@@ -25,6 +25,7 @@ let-me-do/
 │   ├── review/SKILL.md
 │   ├── commit/SKILL.md
 │   ├── explore/SKILL.md
+│   ├── check-system/SKILL.md
 │   └── init-brain/SKILL.md
 ├── brain/                        ← foundation
 │   ├── server/                  ← MCP server (Node, stdio) exposing typed tools
@@ -126,6 +127,7 @@ For richer intent, explicit slash skills are always available:
 /lmd:qa | /lmd:review | /lmd:commit   — ad-hoc tester / reviewer / committer wrappers (outside the autopilot pipeline)
 /lmd:explore <seed-url>          — Playwright UI walk
 /lmd:scan-context                — preview context files agents will load
+/lmd:check-system                — diagnose setup (git, brain DB, optional QA prereqs)
 /lmd:init-brain                  — one-time bootstrap
 ```
 

@@ -60,6 +60,18 @@ Task ids like `20260524-001-[lms]-fix-login` contain `[` and `]`, which are spec
 
 Steps below run sequentially before the workflow starts. They make fresh-start and resume produce the same hydrated in-memory state — workflow steps below contain no initialization, only loop logic.
 
+### 0. System check (blocking tier only)
+
+Invoke `/lmd:check-system --check-only --tier blocking` via the `Skill` tool:
+
+```
+Skill({ skill: 'check-system', args: '--check-only --tier blocking' })
+```
+
+Parse the last line of the returned text. If it starts with `RESULT: FAIL`, exit immediately with the same message and **do not proceed** to step 1 — no task claim, no directory creation, no agent spawn. The skill output already contains the per-check fix instructions; surface them to the user verbatim.
+
+On `RESULT: PASS`, continue. Skip this step entirely when resuming (`task.status == 'active' AND task.current_step IS NOT NULL`) — system check already passed on the original fresh start, and re-running it just adds latency to resume.
+
 ### 1. Resolve task and ownership
 
 - Resolve `task_id` from input (full id, prefix, or 1-indexed entry from latest `list-tasks` output).
