@@ -7,33 +7,23 @@ user-invocable: true
 
 # scan-context
 
-User-facing utility. Lists and previews every rule / context file an lmd agent will read at its mandatory Step 0. Read-only — does not modify anything and re-scans live on each invocation (no cache).
+Lists and previews every rule / context file an lmd agent will read at its Step 0. Read-only; re-scans live (no cache).
 
-## Why this exists
+Use it to: verify all expected rule files are in place; estimate token cost per spawn; spot missing / stale rules; audit which CLAUDE.md sections affect a given scope.
 
-`let-me-do` agents (autopilot, developer, tester, reviewer, committer) always scan project context files at spawn time. This skill lets the user **see what those agents will see**, so they can:
-
-- Verify all expected rule files are in place before running a workflow.
-- Estimate token cost per spawn.
-- Spot missing or stale rule files.
-- Audit which CLAUDE.md sections affect a given scope.
-
-The skill enumerates context files only — project specialist agents (`.claude/agents/*`) are out of scope.
+Specialist agents under `.claude/agents/*` are out of scope (this skill lists context only).
 
 ## Workflow
 
-1. **Parse args**:
-   - `--scope <app>` — filter to one app (e.g. `web`). Default: all.
-   - `--detail` — show full file contents (default: just paths + sizes).
-
-2. **Resolve scope(s)**: if `--scope` is a ` + `-joined multi (e.g. `lms + crm`), split and treat each separately. For each, find the app folder by scanning `package.json` / monorepo workspace patterns, or querying brain for `nodes.app` values matching the scope label.
-
-3. **Enumerate context files** in load order (matches agent Step 0):
+1. Parse args:
+   - `--scope <app>` — filter to one app (e.g. `web`). Default: all scopes detected in repo.
+   - `--detail` — print first ~30 lines of each file (default: just paths + sizes).
+2. Resolve scope(s): if `--scope` is ` + `-joined multi (e.g. `lms + crm`), split and treat each separately. Per scope, find the app folder via `package.json` / monorepo workspace patterns, or query brain for `nodes.app` values matching the label.
+3. Enumerate files in agent Step 0 load order:
    - `<root>/CLAUDE.md`
    - `<root>/.claude/rules/*.md`
-   - All nested `**/CLAUDE.md` inside each scope's folder (e.g. `apps/<scope>/CLAUDE.md`, `apps/<scope>/**/CLAUDE.md`)
-
-4. **Print a tree** with file paths, sizes, and rough token estimates (using a fast `char_count / 4` heuristic — good enough for budget previews):
+   - Nested `**/CLAUDE.md` inside each scope's folder.
+4. Print tree with paths, sizes, and rough token estimates (`char_count / 4` heuristic):
 
 ```
 context files for scope=web (estimated total: ~3.4k tokens)
@@ -44,22 +34,21 @@ context files for scope=web (estimated total: ~3.4k tokens)
   ✓ apps/web/src/auth/CLAUDE.md                          420 tokens
 ```
 
-5. **If `--detail`**: also print first ~30 lines of each file.
-
-6. **Health check**: warn when a scope has no nested `CLAUDE.md` in its folder — agents will work with only root rules, which may be insufficient.
+5. `--detail`: also print first ~30 lines of each file.
+6. Warn when a scope has no nested `CLAUDE.md` — agents will only see root rules.
 
 ## Args
 
 ```
-/lmd:scan-context                       # all scopes, summary
-/lmd:scan-context --scope web              # single scope
-/lmd:scan-context --scope 'lms + crm'      # multi-scope: scan both (quote because of spaces)
-/lmd:scan-context --scope lms-backend --detail  # with file previews
+/lmd:scan-context                              # all scopes, summary
+/lmd:scan-context --scope web
+/lmd:scan-context --scope 'lms + crm'          # quote for spaces
+/lmd:scan-context --scope lms-backend --detail # with file previews
 ```
 
 ## Output
 
-- Tree of context files with sizes + token estimates per scope.
+- Tree per scope with sizes + token estimates.
 - Total estimated context overhead per spawn.
-- List of missing required files.
-- Suggested actions (e.g., "no nested CLAUDE.md in apps/web/ — consider adding one with app-specific rules").
+- Missing required files.
+- Suggested actions (e.g. "no nested CLAUDE.md in apps/web/ — consider adding").
