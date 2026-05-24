@@ -38,9 +38,7 @@ For a preview of what will load: run `/lmd:scan-context --scope <scope>`.
 
 ## Test-env file (`<repo-root>/.lmd/test-env.md`)
 
-Free-form Markdown. Tester is an LLM and will pick out the information it needs as long as the file is reasonably structured and unambiguous. There is no strict schema — write what makes sense for your project.
-
-What tester looks for:
+Free-form Markdown — no strict schema. What tester looks for:
 
 - **One or more dev servers**, each with a URL. If you have multiple servers (vd lms + crm in a monorepo, frontend + backend split), give each a **name** that matches the corresponding task scope so the right server gets picked per task. Single-server projects don't need to name anything.
 - **Test auth info** when criteria need login: a login URL and one or more named user profiles (email + password, or however your project authenticates).

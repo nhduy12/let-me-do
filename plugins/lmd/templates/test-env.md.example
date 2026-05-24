@@ -6,10 +6,10 @@ Copy this file to `<your-project>/.lmd/test-env.md` and adjust to your project.
 If absent, runtime UI verification is disabled — every runtime-classified
 acceptance criterion will fail with an instruction to create this file.
 
-The format is **free-form Markdown**. Tester is an LLM and parses the file
-by reading it; there is no strict schema. The two examples below cover the
-common cases — use whichever fits, or write your own shape as long as the
-information (server URLs, login URL, named user credentials) is unambiguous.
+Format is free-form Markdown — no strict schema. The two examples below
+cover the common cases (single-server and multi-server). Pick whichever
+fits, or write your own shape as long as the server URLs, login URL, and
+named user credentials are unambiguous.
 
 ## Test Server
 

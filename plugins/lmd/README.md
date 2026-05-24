@@ -170,7 +170,7 @@ For runtime verification to work, three prerequisites must exist:
    npx playwright install
    ```
 2. **A dev server reachable** when autopilot runs. Tester does NOT boot the server itself — start it manually before claiming a runtime-heavy task.
-3. **A `.lmd/test-env.md` file at repo root** describing your dev server URL(s) and test users. The format is **free-form Markdown** — tester reads it as an LLM and picks out the info. There is no strict schema; just be unambiguous. Single-server projects need one URL + a login section. Multi-server (monorepo, FE+BE split) projects name the servers so tester can map scope → server. See `plugins/lmd/templates/test-env.md.example` for both shapes.
+3. **A `.lmd/test-env.md` file at repo root** describing your dev server URL(s) and test users. Format is free-form Markdown — single-server projects need one URL + a login section; multi-server (monorepo, FE+BE split) projects name the servers so tester can map scope → server. See `plugins/lmd/templates/test-env.md.example` for both shapes.
 
 Minimal single-server example:
 
