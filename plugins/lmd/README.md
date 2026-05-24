@@ -162,7 +162,7 @@ Patterns evaluate in declaration order; the last matching pattern wins (gitignor
 
 The `tester` agent classifies each acceptance criterion as **static** (verifiable by reading code + walking brain) or **runtime** (requires the live UI). Runtime criteria are verified with Playwright against a dev server.
 
-For runtime verification to work, two prerequisites must exist:
+For runtime verification to work, three prerequisites must exist:
 
 1. **Playwright installed** in the project:
    ```bash
@@ -170,8 +170,9 @@ For runtime verification to work, two prerequisites must exist:
    npx playwright install
    ```
 2. **A dev server reachable** when autopilot runs. Tester does NOT boot the server itself — start it manually before claiming a runtime-heavy task.
+3. **A `.lmd/test-env.md` file at repo root**, with `## Test Server` (dev URL) and optionally `## Test Auth` (login URL + named test users). This is the **only** source of test-env config — there is no fallback to default ports or to `CLAUDE.md` sections.
 
-Two optional CLAUDE.md sections tell tester where to look:
+Copy `plugins/lmd/templates/test-env.md.example` to `<your-project>/.lmd/test-env.md` and fill in the values. Format example:
 
 ```markdown
 ## Test Server
@@ -184,12 +185,14 @@ Start command: npm run dev
 Login URL: http://localhost:5173/login
 Test users:
   - default: test@example.com / testpass
-  - admin: admin@example.com / adminpass
-Throwaway destroyable user (for delete-account tests):
-  - throwaway-pool: see scripts/seed-throwaway.ts
+  - admin:   admin@example.com / adminpass
 ```
 
-If neither section exists, tester probes `localhost:5173`, `localhost:3000`, `localhost:8080` and requires no auth — fine for public-only flows. Criteria that need login but find no `## Test Auth` fail with a clear instruction.
+If `.lmd/test-env.md` is missing, every runtime-classified criterion fails with the instruction to create the file. Static checks still run.
+
+**Gitignore policy** — both patterns work:
+- **Commit** for shared team creds: add `!.lmd/test-env.md` to your `.gitignore` after the `.lmd/` rule so the file escapes the per-task artifact ignore.
+- **Gitignore** for per-dev creds: the default `.lmd/` rule already keeps it local; each dev copies the template.
 
 Tester writes a Playwright spec on the fly at `.lmd/autopilot/tester/<id>-<iter>-runtime.spec.js`, runs it headless, and stores failure screenshots flat at `.lmd/autopilot/tester/<id>-<iter>-screen-<slug>.png`. All artifacts share the `<id>-*` prefix so Step 6 cleanup picks them up on `done`.
 
@@ -197,9 +200,17 @@ Hard limits per tester invocation: 30s/criterion timeout, 5 minute wall-clock to
 
 ## `.lmd/` directory
 
-Artifacts produced during an autopilot session land in `<repo-root>/.lmd/autopilot/<agent>/`. By default they're auto-deleted by Step 6 of autopilot when a task reaches `done`. Files for `blocked` / `cancelled` runs stay on disk for postmortem.
+The `.lmd/` folder at your repo root holds two distinct kinds of content:
 
-Recommendation: add `.lmd/` to `.gitignore` so per-task artifacts never accidentally end up in commits. The plugin's commit pipeline never stages files under `.lmd/`, but a manual `git add` could.
+1. **Autopilot artifacts** under `<repo-root>/.lmd/autopilot/<agent>/`. Auto-deleted by Step 6 of autopilot when a task reaches `done`. Files for `blocked` / `cancelled` runs stay on disk for postmortem.
+2. **User-maintained config**: `<repo-root>/.lmd/test-env.md` — the test environment file for `tester` and `/lmd:explore` (see section above). Lives outside `.lmd/autopilot/` so Step 6 cleanup never touches it.
+
+Recommendation: add `.lmd/` to `.gitignore` so per-task artifacts never accidentally end up in commits. The plugin's commit pipeline never stages files under `.lmd/`, but a manual `git add` could. If you want to share `test-env.md` with the team, carve out an exception:
+
+```gitignore
+.lmd/
+!.lmd/test-env.md
+```
 
 ## Set up the brain database (one-time per project)
 

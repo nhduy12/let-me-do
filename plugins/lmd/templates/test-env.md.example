@@ -1,0 +1,45 @@
+# lmd test environment
+
+Local-only config consumed by the `tester` agent and the `/lmd:explore`
+skill. Copy this file to `<your-project>/.lmd/test-env.md` and fill in
+real values for your project.
+
+If absent, runtime UI verification is disabled — every runtime-classified
+acceptance criterion will fail with an instruction to create this file.
+
+## Test Server
+
+Dev server: http://localhost:5173
+Start command: npm run dev
+
+# The tester does NOT run "Start command" itself — long-lived processes
+# are out of scope. The line is informational; you start the server in
+# your own terminal before claiming a task with runtime criteria.
+
+## Test Auth
+
+Login URL: http://localhost:5173/login
+Test users:
+  - default: test@example.com / testpass
+  - admin:   admin@example.com / adminpass
+
+# Throwaway destroyable user (for delete-account tests):
+#   - throwaway-pool: see scripts/seed-throwaway.ts
+#
+# Profile names ('default', 'admin', 'throwaway-pool') can be referenced
+# from /lmd:explore as --auth admin / --auth throwaway-pool.
+
+# ----------------------------------------------------------------------
+# Gitignore policy is up to you:
+#
+#   - COMMIT the file when test creds are shared across the team (test
+#     users in a shared dev DB). Add an exception to .gitignore:
+#       .lmd/
+#       !.lmd/test-env.md
+#
+#   - GITIGNORE the file when creds are per-developer or sensitive. The
+#     default .gitignore recommendation (`.lmd/`) already keeps it local;
+#     each dev creates their own copy from this template.
+#
+# Either pattern is supported by tester / explore — both just need to
+# find the file on disk at session time.

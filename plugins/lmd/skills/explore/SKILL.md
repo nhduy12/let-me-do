@@ -21,7 +21,7 @@ The walk is **one logical operation** the user triggers — even if it takes 5�
    - URL form: `/lmd:explore http://localhost:5173/login`
    - Node form: `/lmd:explore web:login` → look up URL in brain
    - Empty: ask the user.
-2. **Resolve auth state**: project provides a pre-seeded test user, with path / credentials documented in the project's `CLAUDE.md` under `Test Auth` (or similar). If not documented, the skill refuses with that instruction.
+2. **Resolve auth state**: read `<repo-root>/.lmd/test-env.md` for the `## Test Server` (dev URL) and `## Test Auth` (login URL + named user profiles) sections. This file is the only source of test-env config — same convention as the `tester` agent. If the file is missing or the relevant section is absent, the skill refuses with the instruction to create / fix `.lmd/test-env.md` (see `plugins/lmd/templates/test-env.md.example` for a working template).
 3. **Launch Playwright** via `Bash`:
    ```bash
    npx playwright codegen <url>          # or a bundled walk script

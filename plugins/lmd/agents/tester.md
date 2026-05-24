@@ -25,17 +25,50 @@ scout_file: .lmd/autopilot/scouter/<task_id>.md        # required — for contex
 
 Load context explicitly at the start of every invocation:
 
-1. **Always read** `<repo-root>/CLAUDE.md`. In particular, look for:
-   - **`## Test Server`** section — dev server URL (e.g. `http://localhost:5173`) and optionally a boot command. If absent, the tester defaults to checking `http://localhost:5173`, `http://localhost:3000`, and `http://localhost:8080` in that order.
-   - **`## Test Auth`** section — login URL + test user credentials (or named auth profiles). Same convention as `/lmd:explore`.
+1. **Always read** `<repo-root>/CLAUDE.md`. If absent, note that fact and continue.
 2. **Always read** every file under `<repo-root>/.claude/rules/*.md` if the folder exists.
-3. **Read task** from brain via `mcp__brain__query` — title, summary, acceptance_criteria.
-4. **Derive scope(s)** from the task's `summary` first line `Scope: <value>` convention. May be ` + `-joined (literal spaces). Split on ` + `.
-5. **Walk nested `CLAUDE.md`** in each scope's folder. Read every match — these carry QA conventions (testing framework, assertion style, selector conventions, custom data attributes).
+3. **Read `<repo-root>/.lmd/test-env.md`** if present — the dedicated test-env file. Parse the same two sections (`## Test Server`, `## Test Auth`) as documented under "Test-env file format" below. **This file is the only source of test-env config.** If absent, runtime verification is disabled — see step 4 of the prerequisites probe.
+4. **Read task** from brain via `mcp__brain__query` — title, summary, acceptance_criteria.
+5. **Derive scope(s)** from the task's `summary` first line `Scope: <value>` convention. May be ` + `-joined (literal spaces). Split on ` + `.
+6. **Walk nested `CLAUDE.md`** in each scope's folder. Read every match — these carry QA conventions (testing framework, assertion style, selector conventions, custom data attributes).
 
 Conflict resolution: nested `CLAUDE.md` overrides root for the code inside that folder.
 
 For a preview of what will load: run `/lmd:scan-context --scope <scope>`.
+
+## Test-env file format (`<repo-root>/.lmd/test-env.md`)
+
+Single Markdown file with two well-known sections. Either section may be omitted; tester degrades cleanly when one is missing.
+
+```markdown
+# lmd test environment
+
+Local-only config consumed by the `tester` agent and the `/lmd:explore`
+skill. See plugins/lmd/templates/test-env.md.example in the lmd repo
+for a working template.
+
+## Test Server
+
+Dev server: http://localhost:5173
+Start command: npm run dev
+
+## Test Auth
+
+Login URL: http://localhost:5173/login
+Test users:
+  - default: test@example.com / testpass
+  - admin:   admin@example.com / adminpass
+
+# Throwaway destroyable user (for delete-account tests):
+#   - throwaway-pool: see scripts/seed-throwaway.ts
+```
+
+Gitignore policy is up to the user — both patterns are valid:
+
+- **Commit** the file when test creds are shared across the team (test users in a dev DB).
+- **Gitignore** the file when creds are per-developer or sensitive. Since `.lmd/` is typically gitignored anyway (autopilot artifacts), the default behavior already keeps `test-env.md` local. Add `!.lmd/test-env.md` to `.gitignore` if you want to commit it.
+
+The file lives outside `.lmd/autopilot/` so autopilot's Step 6 cleanup never touches it.
 
 ## Pre-flight — verify required input files exist
 
@@ -45,31 +78,34 @@ Before doing any work, check that `scout_file` and `dev_file` both resolve on di
 
 After the input-file check, probe what's available for runtime QA. This is **non-fatal** — results go into the report's `## Runtime prerequisites` section. If runtime is unavailable, tester falls back to static-only verification.
 
-Three independent probes; record `PW_OK`, `DEV_URL`, `AUTH_OK` in memory. Pick whichever tool fits the host platform — Bash on POSIX (Linux / macOS / Git Bash / WSL), PowerShell on Windows native.
+Four independent probes; record `TEST_ENV_OK`, `PW_OK`, `DEV_URL`, `AUTH_OK` in memory. Pick whichever shell fits the host platform — Bash on POSIX (Linux / macOS / Git Bash / WSL), PowerShell on Windows native.
 
-**1. Playwright availability** — does `npx playwright --version` succeed without falling back to install prompts?
+**1. Test-env file presence** — does `<repo-root>/.lmd/test-env.md` exist? Use the `Read` tool (returns an error if missing). If present, parse:
+
+- The first non-empty value on a line starting with `Dev server:` under the `## Test Server` heading — store as `TEST_SERVER_URL` (or empty if section absent / line missing).
+- The presence of the `## Test Auth` heading — store as `TEST_AUTH_SECTION_PRESENT` (boolean).
+
+Set `TEST_ENV_OK = yes` if the file exists at all; `no` otherwise. **If `TEST_ENV_OK == no`, runtime verification is disabled** — every runtime-classified criterion will fail at step 7 with the instruction to create `.lmd/test-env.md`. Skip probes 2–4; static checks still run.
+
+**2. Playwright availability** — does `npx playwright --version` succeed without falling back to install prompts?
 
 - Bash: `npx --no-install playwright --version >/dev/null 2>&1 && echo yes || echo no`
 - PowerShell: `try { & npx --no-install playwright --version 2>$null | Out-Null; if ($LASTEXITCODE -eq 0) {'yes'} else {'no'} } catch { 'no' }`
 
 Set `PW_OK = yes | no` based on the result.
 
-**2. Dev server reachability** — try the URL from `## Test Server` in `CLAUDE.md` first; if absent, fall back to the standard candidates `http://localhost:5173`, `http://localhost:3000`, `http://localhost:8080` in order. Per URL, attempt an HTTP HEAD/GET with a ~3 s timeout; accept any 2xx/3xx/4xx response (we only care that *something* is listening — a 401 still means a server is up).
+**3. Dev server reachability** — only if `TEST_SERVER_URL` was found. Attempt an HTTP HEAD/GET with a ~3 s timeout; accept any 2xx/3xx/4xx response (a 401 still means a server is up). Do **not** probe default ports when the URL is missing — that was the legacy behavior; the clean-break design requires the URL to be declared explicitly.
 
 - Bash: `curl -s -o /dev/null -m 3 -w "%{http_code}" "$U"` then check that the output matches `^[234][0-9][0-9]$`.
 - PowerShell: `try { (Invoke-WebRequest -Uri $U -Method Head -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }` then check that the integer is in `[200, 499]`.
 
-Set `DEV_URL` to the first URL that responds; empty if none responded.
+Set `DEV_URL = TEST_SERVER_URL` if responsive; empty otherwise (with reason recorded for the report).
 
-**3. Test auth presence** — is there a section heading `## Test Auth` anywhere in `<repo-root>/CLAUDE.md`? Existence of the section is enough; don't validate credentials at this stage.
+**4. Test auth presence** — `AUTH_OK = TEST_AUTH_SECTION_PRESENT`. No external check; credentials are validated only when actually used in a Playwright spec.
 
-- Easiest cross-platform: use the `Read` tool to read `CLAUDE.md` (if it exists) into the agent context, then check whether the literal line `## Test Auth` appears. Avoid shelling out for a 2-line check.
+Record `runtime_ready = (TEST_ENV_OK == yes AND PW_OK == yes AND DEV_URL != "")`. Auth is optional (only needed for criteria that require login).
 
-Set `AUTH_OK = yes | no` based on the result.
-
-Record `runtime_ready = (PW_OK == yes AND DEV_URL != "")`. Auth is optional (only needed for criteria that require login).
-
-The tester does **NOT** boot the dev server itself — long-lived background processes are out of scope. If `DEV_URL` is empty, runtime criteria fail with reason `"dev server not reachable; start it and re-run, or add a ## Test Server section to CLAUDE.md"`.
+The tester does **NOT** boot the dev server itself — long-lived background processes are out of scope. If `DEV_URL` is empty, runtime criteria fail with reason `"dev server not reachable at <url>; start it and re-run, or fix the Dev server: line in .lmd/test-env.md"`.
 
 ## Workflow
 
@@ -116,9 +152,10 @@ The tester does **NOT** boot the dev server itself — long-lived background pro
      - PowerShell: `Remove-Item -LiteralPath $TMP_OUT -Recurse -Force`
 
 7. **Runtime fallback** (criteria classified `runtime` AND `runtime_ready == false`):
-   - Mark each such criterion as `fail` with reason from the prerequisites probe:
+   - Mark each such criterion as `fail` with the precise reason from the prerequisites probe:
+     - "No `.lmd/test-env.md` — create it (see plugin's tester docs for the format) before running tasks with runtime acceptance criteria."
      - "Playwright not installed — run `npm i -D @playwright/test && npx playwright install`."
-     - "Dev server not reachable — start it (vd `npm run dev`) or add `## Test Server` to CLAUDE.md."
+     - "Dev server not reachable at <url> — start it (vd `npm run dev`) or fix the `Dev server:` line in `.lmd/test-env.md`."
    - Do NOT mark as `pass` just because static check would pass — runtime intent must actually be runtime-verified.
 
 8. **Catch gaps** — any edge the criterion implies but brain doesn't know about → add to `pending_edges`. When a navigation seems probabilistic or conditional, mark `confidence: low`.
@@ -136,7 +173,7 @@ For each runtime criterion, generate a `test('<criterion-slug>', async ({ page }
 Patterns to use:
 
 ```javascript
-// Auth (only if criterion needs it — read creds from CLAUDE.md `## Test Auth`)
+// Auth (only if criterion needs it — read creds from .lmd/test-env.md `## Test Auth`)
 await page.goto(LOGIN_URL);
 await page.fill('input[name=email]', AUTH.email);
 await page.fill('input[name=password]', AUTH.password);
@@ -182,7 +219,7 @@ Verdict: pass | fail
 ## Runtime prerequisites
 - Playwright: ok | missing (`npm i -D @playwright/test && npx playwright install`)
 - Dev server: ok at <URL> | unreachable (last tried: <list of URLs>)
-- Test auth: ok | not configured (add `## Test Auth` to CLAUDE.md if any criterion needs login)
+- Test auth: ok | not configured (add `## Test Auth` to `.lmd/test-env.md` if any criterion needs login)
 
 ## Test plan
 (drafted before any check ran — preserved as-is even if execution diverged)
@@ -196,7 +233,7 @@ Verdict: pass | fail
 - criterion 3 — **runtime**: with dialog open, fill email match → click "Confirm" → assert URL redirects to /public + cookie cleared
 
 ### Risks / assumptions
-- Login flow uses `test@example.com` (from CLAUDE.md `## Test Auth`)
+- Login flow uses `test@example.com` (from `.lmd/test-env.md` `## Test Auth`)
 - Settings page is at `/settings` (inferred from `related_node_ids`: web:settings)
 - "Delete account" selector via `getByRole('button', {name: ...})`; if button is icon-only, runtime check will fail and need spec adjustment
 - Throwaway-account criterion 3 reuses the test user — destructive action assumed reversible via DB reset between runs
