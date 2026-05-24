@@ -1,0 +1,34 @@
+{
+  "name": "let-me-do",
+  "owner": {
+    "name": "Duy Nguyen"
+  },
+  "metadata": {
+    "description": "Single-plugin marketplace for `lmd` (let-me-do). Add via `claude plugin marketplace add <github-user>/let-me-do`, then install with `claude plugin install lmd@let-me-do`.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "lmd",
+      "source": "./plugins/lmd",
+      "description": "Autopilot pipeline (scouter → code-planner ⇄ plan-reviewer → developer ⇄ tester → reviewer ⇄ developer → committer) that drives one task from intake to commit. Agent-to-agent context flows through files under `.lmd/autopilot/`; the main agent holds only short status payloads. Tester does both static analysis and runtime Playwright UI verification. Backed by `brain`, a Postgres graph + task store shared across sessions.",
+      "version": "0.1.0",
+      "category": "automation",
+      "tags": [
+        "claude-code",
+        "agents",
+        "automation",
+        "mcp",
+        "postgres",
+        "graph",
+        "memory",
+        "autopilot",
+        "task-runner",
+        "playwright"
+      ],
+      "homepage": "https://github.com/duynguyen-hd/let-me-do",
+      "license": "MIT",
+      "strict": true
+    }
+  ]
+}

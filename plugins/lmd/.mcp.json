@@ -1,0 +1,11 @@
+{
+  "brain": {
+    "command": "node",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/brain/server/index.mjs"],
+    "env": {
+      "DATABASE_URI": "${user_config.database_uri}",
+      "STATEMENT_TIMEOUT_MS": "${user_config.statement_timeout_ms}",
+      "MAX_ROWS": "${user_config.max_rows}"
+    }
+  }
+}

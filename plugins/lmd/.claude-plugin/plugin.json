@@ -1,0 +1,34 @@
+{
+  "name": "lmd",
+  "displayName": "Let Me Do",
+  "version": "0.1.0",
+  "description": "Autopilot pipeline (scouter → code-planner ⇄ plan-reviewer → developer ⇄ tester → reviewer ⇄ developer → committer) that drives a single task from intake to commit. All agent-to-agent context flows through files under `.lmd/autopilot/`; the main agent holds only short status payloads. Backed by 'brain', a Postgres graph + task store shared across sessions.",
+  "author": { "name": "Duy Nguyen" },
+  "license": "MIT",
+  "keywords": ["claude-code", "agents", "automation", "mcp", "postgres", "graph", "memory"],
+
+  "agents": ["./agents/"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+
+  "userConfig": {
+    "database_uri": {
+      "type": "string",
+      "title": "Brain database URI",
+      "description": "Postgres connection string for the brain database. Format: postgresql://ai_agent:<pwd>@<host>:5432/<db_name>. Use a dedicated DB per project.",
+      "sensitive": true
+    },
+    "statement_timeout_ms": {
+      "type": "string",
+      "title": "Brain statement timeout (ms)",
+      "description": "Per-query timeout for the brain MCP server.",
+      "default": "5000"
+    },
+    "max_rows": {
+      "type": "string",
+      "title": "Brain max rows per query",
+      "description": "Hard cap on rows returned by the `query` tool.",
+      "default": "500"
+    }
+  }
+}
