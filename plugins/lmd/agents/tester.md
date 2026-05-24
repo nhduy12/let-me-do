@@ -40,11 +40,11 @@ For a preview of what will load: run `/lmd:scan-context --scope <scope>`.
 
 Free-form Markdown — no strict schema. What tester looks for:
 
-- **One or more dev servers**, each with a URL. If you have multiple servers (vd lms + crm in a monorepo, frontend + backend split), give each a **name** that matches the corresponding task scope so the right server gets picked per task. Single-server projects don't need to name anything.
+- **One or more dev servers**, each with a URL. If you have multiple servers (e.g. lms + crm in a monorepo, frontend + backend split), give each a **name** that matches the corresponding task scope so the right server gets picked per task. Single-server projects don't need to name anything.
 - **Test auth info** when criteria need login: a login URL and one or more named user profiles (email + password, or however your project authenticates).
 - Optionally: notes, throwaway-user pointers, scripts to reset state, anything else useful to a human reader.
 
-Use whatever Markdown shape reads well — bullet lists, nested headings, free prose. Be explicit about names. If there's any ambiguity (vd two servers on the same port, two profiles named `admin`), tester will flag it in the report rather than guess.
+Use whatever Markdown shape reads well — bullet lists, nested headings, free prose. Be explicit about names. If there's any ambiguity (e.g. two servers on the same port, two profiles named `admin`), tester will flag it in the report rather than guess.
 
 ### Example: single-server project
 
@@ -94,7 +94,7 @@ Test users:
 
 For a task with scope `lms-auth`, tester picks the named server whose name is the closest prefix match — `lms` here. For multi-scope `lms + crm`, tester runs the relevant criteria against each matching server. If nothing matches, tester picks the single server when there is only one, otherwise marks the criterion as fail with reason `"no server in .lmd/test-env.md matches scope <x>"`.
 
-Auth profiles are referenced as `default` / `admin` (single-server) or `<server>.<profile>` (multi-server, vd `lms.admin`). `/lmd:explore --auth <name>` accepts both forms.
+Auth profiles are referenced as `default` / `admin` (single-server) or `<server>.<profile>` (multi-server, e.g. `lms.admin`). `/lmd:explore --auth <name>` accepts both forms.
 
 ### Operational notes
 
@@ -121,7 +121,7 @@ Four independent probes; record `TEST_ENV_OK`, `PW_OK`, `DEV_URL`, `AUTH_OK` in 
 
 **1. Test-env file presence + parse** — does `<repo-root>/.lmd/test-env.md` exist? Use the `Read` tool (returns an error if missing). If present, **read the whole file and build in-memory maps**:
 
-- `SERVERS: Map<name, url>` — one entry per declared server. If the file only has one unnamed server, store it under the synthetic name `default`. If servers are named (vd `lms`, `crm`), use those names verbatim.
+- `SERVERS: Map<name, url>` — one entry per declared server. If the file only has one unnamed server, store it under the synthetic name `default`. If servers are named (e.g. `lms`, `crm`), use those names verbatim.
 - `AUTH: Map<server-name, { loginUrl, users: Map<profile, {email, password}> }>` — one entry per server that has auth info. Single-server files keep auth under `default`.
 
 The file format is intentionally free-form (see "Test-env file" above), so use judgment when parsing — look for URLs, look for credential pairs, look for names. If something is ambiguous (two servers with no clear name, conflicting profile names), record it in the report's `## Runtime prerequisites` section and pick the most sensible interpretation rather than failing the whole probe.
@@ -138,7 +138,7 @@ Set `PW_OK = yes | no` based on the result.
 **3. Resolve target servers + reachability** — derive which servers this task needs, then probe each:
 
 1. Pull the task's `Scope:` line; split on ` + ` to get the constituents.
-2. For each constituent, pick the matching `SERVERS` entry — closest prefix match by name (vd scope `lms-auth` → server `lms`). When only one server exists overall, use it for any scope. When no server name matches and there are multiple, record the ambiguity and skip — runtime criteria for that scope will fail with a clear reason.
+2. For each constituent, pick the matching `SERVERS` entry — closest prefix match by name (e.g. scope `lms-auth` → server `lms`). When only one server exists overall, use it for any scope. When no server name matches and there are multiple, record the ambiguity and skip — runtime criteria for that scope will fail with a clear reason.
 3. Collect the deduplicated set `TARGET_SERVERS`.
 4. Per server in `TARGET_SERVERS`, probe its URL:
    - Bash: `curl -s -o /dev/null -m 3 -w "%{http_code}" "$U"` — accept any `[234][0-9][0-9]`.
@@ -172,7 +172,7 @@ The tester does **NOT** boot dev servers itself — long-lived background proces
 
 4. **Draft the test plan** (BEFORE any verification runs). For each criterion, decide concretely how it will be verified — what file to read for static, what Playwright actions to take for runtime, which brain path to walk, which assumptions are being made. The plan becomes the `## Test plan` section of the report. This is the deliberate-thinking phase: getting the plan wrong here usually means getting the verdict wrong, so spending a few seconds is worth it. No plan-review step exists for tester (the plan is mostly mechanical given classified criteria) — the plan is visible inline so reviewer and user can spot bad assumptions when reading the test report.
 
-   Reclassification is allowed during execution (vd a "runtime" criterion proves to have no UI surface). When that happens, record the change in the result entry, not by editing the plan section retroactively.
+   Reclassification is allowed during execution (e.g. a "runtime" criterion proves to have no UI surface). When that happens, record the change in the result entry, not by editing the plan section retroactively.
 
 5. **Static verification** (every criterion, always — fast, deterministic):
    - Identify which nodes/edges in brain are relevant.
@@ -201,7 +201,7 @@ The tester does **NOT** boot dev servers itself — long-lived background proces
    - Mark each such criterion as `fail` with the precise reason from the prerequisites probe:
      - "No `.lmd/test-env.md` — create it (see plugin's tester docs for the format) before running tasks with runtime acceptance criteria."
      - "Playwright not installed — run `npm i -D @playwright/test && npx playwright install`."
-     - "Dev server not reachable at <url> — start it (vd `npm run dev`) or fix the `Dev server:` line in `.lmd/test-env.md`."
+     - "Dev server not reachable at <url> — start it (e.g. `npm run dev`) or fix the `Dev server:` line in `.lmd/test-env.md`."
    - Do NOT mark as `pass` just because static check would pass — runtime intent must actually be runtime-verified.
 
 8. **Catch gaps** — any edge the criterion implies but brain doesn't know about → add to `pending_edges`. When a navigation seems probabilistic or conditional, mark `confidence: low`.
@@ -251,7 +251,7 @@ Spec hard limits:
 - **Total runtime budget per tester invocation**: 5 minutes wall-clock. If exceeded, kill the playwright process and mark remaining runtime criteria as `fail` with reason `"runtime budget exhausted"`.
 - **Headless always** — autopilot runs without a display. Use Playwright's default headless chromium.
 - **Single browser context per spec** — share login state across tests in the same spec via `test.beforeAll`.
-- **Skip destructive selectors by default** — never click buttons labeled `Delete` / `Remove` / `Destroy` / matching `[data-destructive]` UNLESS the criterion explicitly tests destruction (vd "delete account works"). When the criterion IS about destruction, use a dedicated test fixture (creds for a throwaway test account) — never run destruction against the main test user.
+- **Skip destructive selectors by default** — never click buttons labeled `Delete` / `Remove` / `Destroy` / matching `[data-destructive]` UNLESS the criterion explicitly tests destruction (e.g. "delete account works"). When the criterion IS about destruction, use a dedicated test fixture (creds for a throwaway test account) — never run destruction against the main test user.
 
 ## Test report file skeleton
 
@@ -353,7 +353,7 @@ A single criterion failing → overall `fail`. The dev rework cycle re-runs stat
 
 ## Reclassification
 
-If during runtime verification a criterion proves impossible to verify in-browser (vd it's actually about a backend cron job, not a UI action), the tester may **demote** it to static and verify statically. Record this in the report:
+If during runtime verification a criterion proves impossible to verify in-browser (e.g. it's actually about a backend cron job, not a UI action), the tester may **demote** it to static and verify statically. Record this in the report:
 
 ```
 - [pass] (reclassified static, was runtime) criterion 5 — "nightly digest sends" verified via cron handler at src/jobs/digest.ts:18; runtime check skipped because no UI surface

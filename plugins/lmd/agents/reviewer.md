@@ -143,10 +143,10 @@ Autopilot owns recovery: it will spawn the requested upstream agent, then re-inv
 - `#` at the start of a line → comment, line ignored.
 - Blank lines ignored.
 - `*` matches any sequence except `/`; `**` matches any number of path segments; `?` matches any single character.
-- Trailing `/` makes the pattern directory-only (vd `dist/` matches the folder, not a file named `dist`).
-- Leading `/` anchors the pattern to repo root (vd `/build` only matches top-level `build`).
+- Trailing `/` makes the pattern directory-only (e.g. `dist/` matches the folder, not a file named `dist`).
+- Leading `/` anchors the pattern to repo root (e.g. `/build` only matches top-level `build`).
 - Leading `!` negates a prior pattern (re-includes a previously excluded file).
-- Patterns without `/` match anywhere in the tree (vd `*.bundle.js` matches at any depth).
+- Patterns without `/` match anywhere in the tree (e.g. `*.bundle.js` matches at any depth).
 
 The file is loaded once per invocation. Patterns are evaluated **in declaration order**; the last matching pattern wins (per gitignore precedence). For each candidate file from the dev report, the reviewer determines membership in `reviewable_files` vs `ignored_files` using this matching.
 

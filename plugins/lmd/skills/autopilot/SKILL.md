@@ -282,7 +282,7 @@ extract_iter(path):
   # scouter files have no iter — return null
   IF path ends with "/scouter/<task_id>.md": return null
   # Otherwise the suffix after the last "-" before ".md" is the iter
-  name = basename(path) without ".md"        # vd "20260524-001-[lms]-foo-3"
+  name = basename(path) without ".md"        # e.g. "20260524-001-[lms]-foo-3"
   # Strip task_id prefix + "-" exactly (literal compare, never glob)
   IF name == task_id: return null
   IF name starts_with(task_id + "-"):

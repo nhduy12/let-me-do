@@ -76,7 +76,7 @@ Scope is a short label (or set of labels) identifying what folder(s) of the code
 - `packages/ui-kit/` → `ui-kit`
 - `services/api/` → `api`
 - Cross-cutting (docs / infra / ops): `docs`, `infra`, `ops` (no folder needed)
-- Multi-scope: join folder-derived scopes with `+`, vd `crm + lms-auth`, `lms-backend + crm-backend`
+- Multi-scope: join folder-derived scopes with `+`, e.g. `crm + lms-auth`, `lms-backend + crm-backend`
 
 Naming style: **lowercase, kebab-case**, mirror the folder names directly. Don't invent CamelCase or capital prefixes.
 
@@ -89,13 +89,13 @@ Naming style: **lowercase, kebab-case**, mirror the folder names directly. Don't
 5. Confirm with user:
 
 > Inferred scope from folders: **`lms-auth`** (matched `apps/lms/src/modules/auth/`).
-> Confirm, edit, or type another (use ` + ` (with spaces) to combine, vd `crm + lms-auth`).
+> Confirm, edit, or type another (use ` + ` (with spaces) to combine, e.g. `crm + lms-auth`).
 
 > **Forbidden values**: never accept `multi` (or `all` / `everything` / `*`). Those tell agents nothing — they wouldn't know which folder's `CLAUDE.md` files to read. If the user types one of these, ask which folders specifically and rebuild the value.
 
 > **Convention storage:**
 > - **Inside the id** as `[<scope>]` between NNN and slug — purely visual aid.
-> - **As the first line of `summary`** in the form `Scope: <value>` — agents parse this at Step 0 to know which folders' nested `CLAUDE.md` files to scan. For multi-scope, value is the ` + `-joined string (vd `Scope: lms-auth + crm-auth`).
+> - **As the first line of `summary`** in the form `Scope: <value>` — agents parse this at Step 0 to know which folders' nested `CLAUDE.md` files to scan. For multi-scope, value is the ` + `-joined string (e.g. `Scope: lms-auth + crm-auth`).
 
 ### Phase 3 — Done criteria
 

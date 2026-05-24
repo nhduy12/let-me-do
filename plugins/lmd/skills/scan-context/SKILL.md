@@ -26,12 +26,12 @@ The skill enumerates context files only — project specialist agents (`.claude/
    - `--scope <app>` — filter to one app (e.g. `web`). Default: all.
    - `--detail` — show full file contents (default: just paths + sizes).
 
-2. **Resolve scope(s)**: if `--scope` is a ` + `-joined multi (vd `lms + crm`), split and treat each separately. For each, find the app folder by scanning `package.json` / monorepo workspace patterns, or querying brain for `nodes.app` values matching the scope label.
+2. **Resolve scope(s)**: if `--scope` is a ` + `-joined multi (e.g. `lms + crm`), split and treat each separately. For each, find the app folder by scanning `package.json` / monorepo workspace patterns, or querying brain for `nodes.app` values matching the scope label.
 
 3. **Enumerate context files** in load order (matches agent Step 0):
    - `<root>/CLAUDE.md`
    - `<root>/.claude/rules/*.md`
-   - All nested `**/CLAUDE.md` inside each scope's folder (vd `apps/<scope>/CLAUDE.md`, `apps/<scope>/**/CLAUDE.md`)
+   - All nested `**/CLAUDE.md` inside each scope's folder (e.g. `apps/<scope>/CLAUDE.md`, `apps/<scope>/**/CLAUDE.md`)
 
 4. **Print a tree** with file paths, sizes, and rough token estimates (using a fast `char_count / 4` heuristic — good enough for budget previews):
 

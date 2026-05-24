@@ -110,7 +110,7 @@ Claude: [auto-invokes claim-task with task #1]
 
 Task id format: `<YYYYMMDD>-<NNN>-[<scope>]-<slug>`
 - `<scope>` examples (single): `lms` (whole app), `lms-backend` (one layer), `lms-auth` (one module in a single-app repo), `docs`, `infra`.
-- `<scope>` for **multi-scope tasks** (real-world: one task touches several areas): join with ` + ` (spaces around the plus), vd `[lms + exam-frontend]`, `[lms-backend + crm-backend]`, `[lms-auth + backend-auth]`.
+- `<scope>` for **multi-scope tasks** (real-world: one task touches several areas): join with ` + ` (spaces around the plus), e.g. `[lms + exam-frontend]`, `[lms-backend + crm-backend]`, `[lms-auth + backend-auth]`.
 - `<scope>` is canonical in the `summary` field's `Scope:` line — the brackets in the id are a visual aid for humans scanning lists.
 - For multi-scope tasks, agents read the nested `CLAUDE.md` files inside **every constituent's folder** at Step 0; conflicting rules are surfaced to the user.
 

@@ -54,7 +54,7 @@ Walk one path at a time — no parallel sub-scouts. Never read outside the resol
 
 ### 2. Execute statically
 
-Read source, never run the app. If the survey requires runtime data (vd "what does the dashboard look like for an unauthenticated user"), record that under "Open questions" in the report and recommend `/lmd:explore <seed>`.
+Read source, never run the app. If the survey requires runtime data (e.g. "what does the dashboard look like for an unauthenticated user"), record that under "Open questions" in the report and recommend `/lmd:explore <seed>`.
 
 For `deep` mode, expand iteratively: each new finding generates the next query. For `quick`, do one pass and stop.
 
