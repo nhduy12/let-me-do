@@ -54,7 +54,11 @@ CREATE TABLE IF NOT EXISTS nodes (
   app           TEXT NOT NULL,
   type          TEXT NOT NULL DEFAULT 'page',
   url           TEXT,
-  mounted_on    TEXT REFERENCES nodes(id),
+  -- mounted_on: soft reference to a parent node id. Intentionally NOT a FK so
+  -- that agents can upsert modals before their parent pages exist (frequent
+  -- during scouter discovery). Orphan references are tolerated; consumers
+  -- treat missing parents as "unknown".
+  mounted_on    TEXT,
   label         TEXT NOT NULL,
   grp           TEXT,
   description   TEXT,
@@ -102,6 +106,10 @@ CREATE OR REPLACE FUNCTION find_paths(
   max_depth INT DEFAULT 4
 ) RETURNS TABLE(path TEXT[], steps TEXT[], depth INT)
 LANGUAGE sql STABLE AS $$
+  -- BFS with cycle protection via NOT ANY(w.path). max_depth is clamped to
+  -- [1, 8] at the MCP layer; statement_timeout is the ultimate guard against
+  -- dense-graph explosion. UI flow graphs are typically sparse so this is
+  -- safe in practice.
   WITH RECURSIVE walk AS (
     SELECT
       e.target,
@@ -136,6 +144,10 @@ GRANT EXECUTE ON FUNCTION find_paths(TEXT, TEXT, INT) TO ai_agent;
 -- ====== PART 5: Tasks region (workflow state) ======
 -- Stores cross-developer tasks the lmd agent team picks up and processes.
 -- People identity is the git user.email of whoever invoked the skill.
+--
+-- Audit history lives in the separate `task_events` table (PART 6), not in a
+-- JSONB column. That keeps long-running tasks cheap to update and lets
+-- autopilot hydrate sliding windows with normal SQL filters.
 
 BEGIN;
 
@@ -152,11 +164,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   claimed_at          TIMESTAMPTZ,
 
   current_step        TEXT,                              -- dev / test / review / commit / done
-  iteration           INT NOT NULL DEFAULT 0,
+  iteration           INT NOT NULL DEFAULT 0,            -- bumped only on dev-step COMPLETION events; never on entry
 
   acceptance_criteria JSONB NOT NULL DEFAULT '[]',
   related_node_ids    JSONB NOT NULL DEFAULT '[]',
-  history             JSONB NOT NULL DEFAULT '[]',       -- append-only audit of step transitions
   blockers            JSONB NOT NULL DEFAULT '[]',
 
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -184,5 +195,45 @@ CREATE INDEX IF NOT EXISTS tasks_fts
   );
 
 ALTER TABLE tasks OWNER TO ai_agent;
+
+COMMIT;
+
+-- ====== PART 6: Task events (append-only audit log) ======
+-- Replaces the legacy tasks.history JSONB column. Each row is one event:
+-- workflow step transition, claim/unclaim/transfer, or completion. Autopilot
+-- resume reads from this table; brain writes never rewrite tasks rows just to
+-- append history, so long-lived tasks stay cheap to update.
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS task_events (
+  id          BIGSERIAL PRIMARY KEY,
+  task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL,        -- 'step' / 'claim' / 'unclaim' / 'transfer' / 'complete' / 'cancel'
+  step        TEXT,                 -- scout/plan/plan-review/dev/test/review/commit/done (when kind='step')
+  iter        INT,                  -- plan_iter or dev_iter when kind='step'
+  agent       TEXT,                 -- which agent caused this transition (when kind='step')
+  outcome     TEXT,                 -- NULL on entry; verdict on completion (when kind='step')
+  signature   TEXT,                 -- 16-hex signature (only on step-completion events)
+  report_ref  TEXT,                 -- artifact path under .lmd/autopilot/<agent>/
+  actor       TEXT,                 -- git user.email (when kind in 'claim'/'unclaim'/'transfer')
+  reason      TEXT,                 -- free-text (mainly for unclaim/cancel)
+  payload     JSONB,                -- catch-all for kind-specific extras
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS task_events_task_idx
+  ON task_events (task_id, created_at);
+
+CREATE INDEX IF NOT EXISTS task_events_step_completion_idx
+  ON task_events (task_id, step, iter)
+  WHERE kind = 'step' AND outcome IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS task_events_step_signature_idx
+  ON task_events (task_id, step, created_at DESC)
+  WHERE kind = 'step' AND signature IS NOT NULL;
+
+ALTER TABLE task_events OWNER TO ai_agent;
+GRANT USAGE, SELECT ON SEQUENCE task_events_id_seq TO ai_agent;
 
 COMMIT;

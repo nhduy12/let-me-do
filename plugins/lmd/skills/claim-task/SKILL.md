@@ -25,7 +25,7 @@ The skill accepts any of these as the task reference:
 2. **Parse args**:
    - Positional: `<task-ref>` (required) — id / prefix / index
    - `--no-start` — only claim, don't auto-spawn autopilot.
-   - `--force` — claim even if someone else already claimed (transfer ownership). Appends `{event: 'transfer', from: <old_owner>, to: <new_owner>, at: now()}` to `history`. Anyone can transfer (no role check).
+   - `--force` — claim even if someone else already claimed (transfer ownership). The MCP tool appends a `transfer` row to `task_events` (carries the prior owner in `payload`). Anyone can transfer (no role check).
 3. **Resolve task-ref to a full id** (see "Identifier resolution" above).
 4. **Atomic claim** — call `mcp__brain__claim_task({ id, claimer, force })`. The MCP tool runs a race-safe `UPDATE` with `WHERE (claimed_by IS NULL OR claimed_by = $claimer)`. Pass `force=true` to transfer ownership from another user.
 5. **Check result**:
@@ -33,7 +33,7 @@ The skill accepts any of these as the task reference:
    - 0 rows → someone else owns it; report current owner and suggest `--force` or wait.
 6. **Hand off to `autopilot`** unless `--no-start`. The main agent invokes the `autopilot` skill via the Skill tool (`Skill({ skill: 'autopilot', args: '<task_id>' })`). Autopilot's preflight loads context and runs the scout → plan ⇄ plan-review → dev ⇄ test → review ⇄ dev → commit pipeline.
 
-Re-claim of `blocked` or `cancelled` tasks is allowed: status resets to `claimed`, `current_step` and history are preserved for inspection.
+Re-claim of `blocked` or `cancelled` tasks is allowed: status resets to `claimed`, `current_step` and the `task_events` audit log are preserved for inspection.
 
 ## Args / examples
 

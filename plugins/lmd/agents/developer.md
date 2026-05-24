@@ -25,18 +25,9 @@ prior_review_file: .lmd/autopilot/reviewer/<task_id>-<M>.md  # optional — revi
 
 ## Step 0 — MANDATORY context scan (always run first)
 
-Load context explicitly at the start of every invocation:
+Follow the 5-step procedure in `conventions/context-scan.md` (relative to plugin root).
 
-1. **Always read** `<repo-root>/CLAUDE.md`.
-2. **Always read** every file under `<repo-root>/.claude/rules/*.md` if the folder exists.
-3. **Read task** from brain — title, summary, acceptance_criteria, related_node_ids.
-4. **Derive scope(s)** from the task's `summary` first line `Scope: <value>` convention. May be ` + `-joined (literal spaces). Split on ` + `.
-5. **Walk nested `CLAUDE.md`** in each scope's folder. Read every match. These are where app-specific rules live (tech stack, conventions, forbidden patterns).
-6. **Specialist check** per scope: for each scope, look for `<repo-root>/.claude/agents/<scope>-*-dev.md`. If a matching specialist exists AND the change in that scope is complex, prefer to delegate that portion. Multi-scope tasks may end up delegating different parts to different specialists.
-
-If rules conflict, more specific wins (nested CLAUDE.md > root CLAUDE.md).
-
-For a preview of what will load: run `/lmd:scan-context --scope <scope>`.
+**Developer addendum** (after step 5): per scope, look for `<repo-root>/.claude/agents/<scope>-*-dev.md`. If a matching specialist exists AND the change in that scope is complex, prefer to delegate that portion. Multi-scope tasks may end up delegating different parts to different specialists.
 
 ## Pre-flight — verify required input files exist
 

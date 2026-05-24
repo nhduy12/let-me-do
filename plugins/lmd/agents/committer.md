@@ -22,17 +22,15 @@ commit_type: feat | fix | refactor | chore | docs | test       # optional, only 
 
 ## Step 0 — MANDATORY context scan (always run first)
 
-Load context explicitly at the start of every invocation:
+Follow the 5-step procedure in `conventions/context-scan.md` (relative to plugin root).
 
-1. **Always read** `<repo-root>/CLAUDE.md` (for commit message conventions, trailer rules, hook policies).
-2. **Always read** every file under `<repo-root>/.claude/rules/*.md` if the folder exists.
-3. **Read task** from brain — title, summary, type.
-4. **Derive scope(s)** from the task's `summary` first line `Scope: <value>` convention. May be ` + `-joined (literal spaces). Split on ` + `.
-5. **Walk nested `CLAUDE.md`** in each scope's folder. Read every match — these define per-scope commit conventions (prefix, conventional-commit type, etc). For multi-scope tasks, the commit subject may carry multiple scope tags (e.g. `[lms + crm]`).
+**Committer addendum**: while reading the loaded `CLAUDE.md` files (steps 1 + 5), pay special attention to:
 
-Pay special attention to: conventional-commit requirements, forbidden trailers (e.g., `Co-Authored-By`), hook bypass policies.
+- **Conventional-commit requirements** — auto-detect from `## Git Commit Rules` / `## Commit Convention` sections. Required only when documented; otherwise the message is freeform.
+- **Forbidden trailers** — e.g. some projects forbid `Co-Authored-By`. Co-author trailers are **opt-in** by default; skip unless the project explicitly says to include one.
+- **Hook bypass policies** — `--no-verify` is **never** used by this agent (see "What committer does NOT do").
 
-Conventional-commit format is **required only** if the project's `CLAUDE.md` mandates it (auto-detect from `## Git Commit Rules` / `## Commit Convention` sections). Otherwise the message is freeform. Co-author trailers are **opt-in** — skip unless the project explicitly says to include one.
+For multi-scope tasks, the commit subject may carry multiple scope tags (e.g. `[lms + crm]`) per the rules surfaced in the per-scope nested `CLAUDE.md`.
 
 ## Pre-flight — verify required input files exist
 

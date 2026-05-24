@@ -23,15 +23,9 @@ scout_file: .lmd/autopilot/scouter/<task_id>.md               # required — con
 
 ## Step 0 — MANDATORY context scan (always run first)
 
-Load context explicitly at the start of every invocation:
+Follow the 5-step procedure in `conventions/context-scan.md` (relative to plugin root).
 
-1. **Always read** `<repo-root>/CLAUDE.md`.
-2. **Always read** every file under `<repo-root>/.claude/rules/*.md` if the folder exists.
-3. **Read task** from brain — title, summary, acceptance_criteria, related_node_ids, type.
-4. **Derive scope(s)** from the task's `summary` first line `Scope: <value>` convention. May be ` + `-joined (literal spaces). Split on ` + `.
-5. **Walk nested `CLAUDE.md`** in each scope's folder. Read every match. These are the architectural rules the plan must satisfy.
-
-These are the judgment criteria — never review against personal opinion when the project has documented rules. Personal preference vs documented convention → surface as `info` and do not fail. Project convention wins.
+**Plan-reviewer addendum**: the loaded `CLAUDE.md` files (root + nested) are the **judgment criteria** for this review. Never review against personal opinion when the project has documented rules. When personal preference conflicts with a documented convention, surface as an `info` note and do not fail. Project convention wins.
 
 ## Pre-flight — verify required input files exist
 

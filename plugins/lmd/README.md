@@ -216,7 +216,7 @@ The script creates:
 
 - Database `brain_my_project` (idempotent)
 - Role `ai_agent` (login, not superuser, owns no DBs beyond its own tables)
-- Tables `nodes`, `edges` with GIN indexes (JSONB + full-text)
+- Tables `nodes`, `edges`, `tasks`, `task_events` with GIN + B-tree indexes
 - Function `find_paths(src, tgt, max_depth)` for path traversal
 - Full GRANTs for `ai_agent` **only in this DB**
 
@@ -239,10 +239,11 @@ SELECT count(*) FROM nodes;             -- OK
 | `mcp__brain__upsert_edge` | Idempotent edge upsert | Parameterized; required: id, source, target, action, steps |
 | `mcp__brain__delete_node` / `delete_edge` | Remove graph records | `delete_node` cascades to dependent edges by default |
 | `mcp__brain__create_task` | Insert task; auto-generates id `YYYYMMDD-NNN-[scope]-slug` | Parameterized; `scope` required when id is auto |
-| `mcp__brain__claim_task` | Race-safe claim | Sets `claimed_by`, `claimed_at`, status; `force` to transfer |
-| `mcp__brain__unclaim_task` | Release task back to pool | Only current claimer (or `force`) |
-| `mcp__brain__update_task_step` | Autopilot step transitions (scout / plan / plan-review / dev / test / review / commit / done) | Appends to `history`; `signature` + `iter` persisted so stuck-loop windows survive resume; bumps `tasks.iteration` only on the dev step's entry call |
-| `mcp__brain__complete_task` | Mark task done | Sets `completed_at`, appends history |
+| `mcp__brain__claim_task` | Race-safe claim | Sets `claimed_by`, `claimed_at`, status; appends a `claim` (or `transfer`) row to `task_events`; `force` to transfer |
+| `mcp__brain__unclaim_task` | Release task back to pool | Only current claimer (or `force`); appends an `unclaim` row to `task_events` |
+| `mcp__brain__update_task_step` | Autopilot step transitions (scout / plan / plan-review / dev / test / review / commit / done) | Appends a `step` row to `task_events`; `signature` + `iter` persisted so stuck-loop windows survive resume; bumps `tasks.iteration` only on the dev step's **completion** call (so a crash between entry and completion does not skip an iter) |
+| `mcp__brain__complete_task` | Mark task done | Sets `completed_at`, appends a `complete` row to `task_events` |
+| `mcp__brain__cancel_task` | Mark task cancelled (user interrupt) | Sets `status='cancelled'`, appends a `cancel` row to `task_events`; no-op if task is already `done`/`cancelled` |
 | `mcp__brain__find_paths` | Path traversal A → B (1..max_depth hops) | Parameterized, calls the `find_paths` SQL function |
 | `mcp__brain__get_settings` | Returns runtime settings (timeouts, row cap) | None — purely informational |
 
@@ -282,6 +283,26 @@ SELECT count(*) FROM nodes;             -- OK
 | `steps` | TEXT | QA steps |
 | `condition` | TEXT | Predicate under which the edge fires |
 | `note` | TEXT | Notes |
+
+### `task_events` — append-only audit log for tasks
+
+Every task mutation that's worth replaying lands here. Autopilot resume reads from this table; `tasks` row updates never carry per-event payloads, so long-running tasks stay cheap to update.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `id` | BIGSERIAL PK | Auto-incrementing event id |
+| `task_id` | TEXT FK | References `tasks(id)`; cascades on delete |
+| `kind` | TEXT | `step` / `claim` / `unclaim` / `transfer` / `complete` / `cancel` |
+| `step` | TEXT | Workflow step (when `kind='step'`): `scout` / `plan` / `plan-review` / `dev` / `test` / `review` / `commit` / `done` |
+| `iter` | INT | `plan_iter` or `dev_iter` (when `kind='step'`) |
+| `agent` | TEXT | Which agent caused the transition |
+| `outcome` | TEXT | `NULL` on entry; verdict on completion (e.g. `complete` / `pass` / `fail` / `approve` / `request-changes` / `blocked`) |
+| `signature` | TEXT | 16-hex short signature (only on step-completion events) |
+| `report_ref` | TEXT | Artifact path under `.lmd/autopilot/<agent>/` |
+| `actor` | TEXT | `git user.email` (when `kind` in `claim`/`unclaim`/`transfer`) |
+| `reason` | TEXT | Free-text (mainly for `unclaim`/`cancel`) |
+| `payload` | JSONB | Catch-all for kind-specific extras |
+| `created_at` | TIMESTAMPTZ | Insert time (NOT NULL DEFAULT now()) |
 
 ## Defense-in-depth (3 layers)
 

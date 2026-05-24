@@ -1,7 +1,7 @@
 ---
 name: autopilot
 description: Drive a claimed task end-to-end through scouter → code-planner ⇄ plan-reviewer → developer ⇄ tester → reviewer ⇄ developer → committer, with hard iteration caps. All agent-to-agent context flows through files under `.lmd/autopilot/`; autopilot only handles short status payloads (file paths + signatures). Invoked automatically by claim-task after a successful claim, or by the user against an already-claimed task id (resume).
-allowed-tools: Bash, Read, Write, Glob, Grep, mcp__brain__query, mcp__brain__find_paths, mcp__brain__get_settings, mcp__brain__claim_task, mcp__brain__update_task_step, mcp__brain__complete_task
+allowed-tools: Bash, Read, Write, Glob, Grep, mcp__brain__query, mcp__brain__find_paths, mcp__brain__get_settings, mcp__brain__claim_task, mcp__brain__update_task_step, mcp__brain__complete_task, mcp__brain__cancel_task
 user-invocable: true
 ---
 
@@ -24,9 +24,9 @@ To keep the main (autopilot) context small, every detailed artifact lives in a f
 └── reviewer/<task_id>-<dev_iter>.md           # one per review, paired with same dev_iter — reviewer
 ```
 
-Two independent iteration counters, both reconstructed from brain history on resume:
-- **`plan_iter`** — max `iter` value among `step='plan'` history entries (0 if none).
-- **`dev_iter`** — `tasks.iteration` (the dev `update_task_step` entry call bumps it).
+Two independent iteration counters, both reconstructed from `task_events` on resume:
+- **`plan_iter`** — max `iter` value among `task_events` rows where `kind='step' AND step='plan' AND outcome IS NOT NULL` (0 if none). Entry-only events from crashed iterations are ignored.
+- **`dev_iter`** — max `iter` value among `task_events` rows where `kind='step' AND step='dev' AND outcome IS NOT NULL` (0 if none). `tasks.iteration` mirrors this but is only bumped at dev-step completion, so a crash between entry and completion does not skip an iter.
 
 ## Task ids contain `[scope]`
 
@@ -101,51 +101,80 @@ pending_review_feedback_file = null
 recovery_attempts = {}
 ```
 
-### 4. Hydrate from history (only when resuming)
+### 4. Hydrate from task_events (only when resuming)
 
 Resuming means `task.status == 'active'` AND `task.current_step IS NOT NULL`. Skip this entire step on fresh start.
 
+All queries read from `task_events`. Critically, `plan_iter` and `dev_iter` derive from **completed** events only (`outcome IS NOT NULL`). An orphan entry-only event from a crashed iteration must not count — otherwise resume would bump past the crashed iter and skip a number.
+
 ```sql
--- Query A: max plan_iter from history
-SELECT COALESCE(MAX((entry->>'iter')::int), 0) AS max_iter
-FROM tasks t, jsonb_array_elements(t.history) entry
-WHERE t.id = $1 AND entry->>'step' = 'plan';
+-- Query A: latest completed plan_iter (entries without a matching completion are ignored)
+SELECT COALESCE(MAX(iter), 0) AS max_iter
+FROM task_events
+WHERE task_id = $1
+  AND kind = 'step'
+  AND step = 'plan'
+  AND outcome IS NOT NULL;
 
 -- Query B: signatures per loop step, newest first (autopilot picks first 3 per step)
-SELECT entry->>'step' AS step, entry->>'signature' AS signature,
-       (entry->>'iter')::int AS iter, (entry->>'at')::timestamptz AS at
-FROM tasks t, jsonb_array_elements(t.history) entry
-WHERE t.id = $1 AND entry->>'signature' IS NOT NULL
-ORDER BY at DESC;
+SELECT step, signature, iter, created_at
+FROM task_events
+WHERE task_id = $1
+  AND kind = 'step'
+  AND signature IS NOT NULL
+ORDER BY created_at DESC;
 
--- Query C: latest approved plan iter
-SELECT MAX((entry->>'iter')::int) AS iter
-FROM tasks t, jsonb_array_elements(t.history) entry
-WHERE t.id = $1 AND entry->>'step' = 'plan-review' AND entry->>'outcome' = 'pass';
+-- Query C: latest approved plan_iter
+SELECT MAX(iter) AS iter
+FROM task_events
+WHERE task_id = $1
+  AND kind = 'step'
+  AND step = 'plan-review'
+  AND outcome = 'pass';
 
--- Query D: latest passed test iter
-SELECT MAX((entry->>'iter')::int) AS iter
-FROM tasks t, jsonb_array_elements(t.history) entry
-WHERE t.id = $1 AND entry->>'step' = 'test' AND entry->>'outcome' = 'pass';
+-- Query D: latest passed test iter (this is also the latest matching dev_iter for last_dev_file)
+SELECT MAX(iter) AS iter
+FROM task_events
+WHERE task_id = $1
+  AND kind = 'step'
+  AND step = 'test'
+  AND outcome = 'pass';
+
+-- Query D2: latest completed dev_iter — protects against crashes between
+-- dev-entry and dev-completion. Used to seed local dev_iter.
+SELECT COALESCE(MAX(iter), 0) AS max_iter
+FROM task_events
+WHERE task_id = $1
+  AND kind = 'step'
+  AND step = 'dev'
+  AND outcome IS NOT NULL;
 
 -- Query E: latest failed test (for prior_test_file on resume at dev step)
-SELECT entry->>'report_ref' AS file
-FROM tasks t, jsonb_array_elements(t.history) entry
-WHERE t.id = $1 AND entry->>'step' = 'test' AND entry->>'outcome' = 'fail'
-ORDER BY at DESC LIMIT 1;
+SELECT report_ref AS file
+FROM task_events
+WHERE task_id = $1
+  AND kind = 'step'
+  AND step = 'test'
+  AND outcome = 'fail'
+ORDER BY created_at DESC
+LIMIT 1;
 
 -- Query F: latest review request-changes (for pending_review_feedback_file on resume at dev step)
-SELECT entry->>'report_ref' AS file
-FROM tasks t, jsonb_array_elements(t.history) entry
-WHERE t.id = $1 AND entry->>'step' = 'review' AND entry->>'outcome' = 'request-changes'
-ORDER BY at DESC LIMIT 1;
+SELECT report_ref AS file
+FROM task_events
+WHERE task_id = $1
+  AND kind = 'step'
+  AND step = 'review'
+  AND outcome = 'request-changes'
+ORDER BY created_at DESC
+LIMIT 1;
 ```
 
 Apply results:
 
 ```
-plan_iter = Query A result
-dev_iter  = task.iteration
+plan_iter = Query A result      # latest plan iter that COMPLETED
+dev_iter  = Query D2 result     # latest dev iter that COMPLETED (NOT task.iteration — that may have been bumped without a completion if the bump rule changes; D2 is authoritative)
 
 # Hydrate signature windows (newest 3 per step, ordered ASC after slicing)
 For each step in [plan, plan-review, dev, test, review]:
@@ -255,10 +284,10 @@ The "strip leading prefix" must be done with literal substring comparison, not g
 
 Every `Agent.spawn` is bracketed by **two** calls:
 
-1. **Entry** (before spawn): `outcome: null, signature: null`. Marks `current_step`; bumps `tasks.iteration` only on `step='dev'`. Writes a `started` marker.
-2. **Completion** (after spawn): `outcome: <verdict>, signature: <hex>, iter: <N>`. Does NOT re-bump iteration. Persists the signature into history so resume can hydrate windows.
+1. **Entry** (before spawn): `outcome: null, signature: null`. Marks `current_step`. Writes a `step` event to `task_events`. Does NOT bump `tasks.iteration`.
+2. **Completion** (after spawn): `outcome: <verdict>, signature: <hex>, iter: <N>`. Writes a second `step` event with the verdict. Bumps `tasks.iteration` only when `step='dev'`.
 
-If autopilot crashes between entry and completion, resume hydration will reconstruct the sliding windows from existing completion entries (the missing completion is not counted). The agent for the crashed iter is re-spawned; its file gets overwritten (write is idempotent), a fresh completion marker is written.
+The bump-on-completion rule is what makes crash recovery safe. If autopilot crashes between entry and completion, the entry event sits in `task_events` with `outcome IS NULL`. Resume hydration (Query A / D2) ignores those orphan entries and recovers `plan_iter` / `dev_iter` from the last *completed* iter. The loop then bumps the local counter and re-spawns the agent for the same iter; its file gets overwritten (Write is idempotent), and a fresh completion event is written.
 
 ## Workflow
 
@@ -382,7 +411,7 @@ LOOP:
     bail to blocked (kind='test_unresolved', last_test_file=prior_test_file)
     EXIT
 
-  # --- developer: entry (bumps tasks.iteration) ---
+  # --- developer: entry (writes step event; does NOT bump tasks.iteration yet) ---
   dev_ref = ".lmd/autopilot/developer/" + task_id + "-" + dev_iter + ".md"
   mcp__brain__update_task_step({ id: task_id, step: 'dev', agent: 'autopilot',
     outcome: null, report_ref: dev_ref, iter: dev_iter })
@@ -424,7 +453,7 @@ LOOP:
 
   dev_file = dev_result.file
 
-  # --- developer: completion (persists signature) ---
+  # --- developer: completion (persists signature, bumps tasks.iteration) ---
   mcp__brain__update_task_step({ id: task_id, step: 'dev', agent: 'autopilot',
     outcome: 'complete', report_ref: dev_file,
     signature: dev_result.signature, iter: dev_iter })
@@ -507,6 +536,14 @@ LOOP:
       EXIT
     pending_review_feedback_file = review_file
     prior_test_file = null   # tester ran against an older dev iter; will re-test after rework
+    # Reset dev/test sliding windows before re-entering step2_loop. The dev
+    # work that follows addresses reviewer feedback against a fresh diff, so
+    # signatures from the pre-review dev/test cycle would produce false-positive
+    # stuck_dev_loop / stuck_test_loop detections if mixed with the new ones.
+    # review_sigs is NOT reset — it tracks the current review chain across
+    # rework iterations.
+    dev_sigs = []
+    test_sigs = []
     GOTO step2_loop
     # dev_cap counter does NOT reset (protects against ping-pong); dev_iter keeps growing
 ```
@@ -590,18 +627,17 @@ When any agent is blocked by missing inputs, it returns the `file_not_found` pay
 ## Cancellation
 
 If user interrupts (Ctrl+C) or task `status` flips to `cancelled` externally:
-1. Set `status = 'cancelled'` (if currently `active`).
-2. Append `{event:'cancelled', at:now()}` to history.
-3. Exit immediately — don't finish the in-flight sub-agent.
+1. Call `mcp__brain__cancel_task({ id: task_id, reason: 'user-interrupt' })` (or similar reason). This both sets `status='cancelled'` and appends a `cancel` row to `task_events` atomically.
+2. Exit immediately — don't finish the in-flight sub-agent.
 
 Cancellation is final. Restart: `unclaim-task` then `claim-task`. Files under `.lmd/autopilot/` remain on disk for postmortem (cleanup only runs on `done`).
 
 ## State invariants
 
 - `claimed_by` never changes during autopilot. The skill bails if it does.
-- Every iteration writes **two** entries to history: entry marker (`outcome: null`), then completion marker (`outcome: <verdict>, signature: <hex>`).
-- `tasks.iteration` increments only on the **entry** call of the `dev` step. Completion calls never re-bump.
-- Resume reads everything it needs from brain history + disk existence checks. The in-memory state of a previous session is not persisted; it's reconstructed.
+- Every iteration writes **two** rows to `task_events`: entry marker (`outcome IS NULL`), then completion marker (`outcome = <verdict>, signature = <hex>`).
+- `tasks.iteration` increments only on the **completion** call of the `dev` step. Entry calls never bump. This is what makes crash recovery safe — see "Two `update_task_step` calls per iteration" above.
+- Resume reads everything it needs from `task_events` + disk existence checks. The in-memory state of a previous session is not persisted; it's reconstructed.
 - `blockers` JSONB is append-only.
 - Autopilot itself never reads sub-agent report files (only their paths), never reads source code, never mutates `nodes` / `edges`.
 - Autopilot writes to `.lmd/autopilot/` only for: (a) the synthetic devfeedback plan-review file used when developer reports `plan-insufficient`, (b) the per-task delete in step6_cleanup. No other artifact writes.

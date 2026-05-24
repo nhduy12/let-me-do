@@ -26,10 +26,32 @@ const FORBIDDEN_RE =
   /\b(DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE|VACUUM|REINDEX|CLUSTER|COPY|SECURITY|SET\s+ROLE|RESET\s+ROLE|LISTEN|NOTIFY|LOAD|DO|CALL)\b/i;
 const SELECT_START_RE = /^\s*(SELECT|WITH)\b/i;
 const WRITE_START_RE = /^\s*(INSERT|UPDATE|DELETE|WITH)\b/i;
+const WRITE_KEYWORD_RE = /\b(INSERT|UPDATE|DELETE)\b/i;
+
+// Strip string literals, dollar-quoted strings, quoted identifiers, and
+// SQL comments before running keyword regex checks. Without this, a benign
+// query like `SELECT label FROM nodes WHERE label = 'Create account'` would
+// trip FORBIDDEN_RE on the literal "CREATE" inside a string.
+function stripStringsAndComments(sql) {
+  let out = sql;
+  // Line comments: -- to end of line
+  out = out.replace(/--[^\n]*/g, "");
+  // Block comments: /* ... */ (non-greedy, handles multiline)
+  out = out.replace(/\/\*[\s\S]*?\*\//g, "");
+  // Dollar-quoted strings: $tag$ ... $tag$  (Postgres-specific)
+  out = out.replace(/\$([A-Za-z_][A-Za-z0-9_]*)?\$[\s\S]*?\$\1\$/g, "''");
+  // Single-quoted strings (handles '' escape)
+  out = out.replace(/'(?:[^']|'')*'/g, "''");
+  // Double-quoted identifiers (handles "" escape) — keep as opaque empty pair
+  out = out.replace(/"(?:[^"]|"")*"/g, '""');
+  return out;
+}
 
 function ensureSingleStatement(sql) {
   const trimmed = sql.replace(/;\s*$/, "").trim();
-  if (trimmed.includes(";")) {
+  // Check for embedded semicolons on the stripped version so that semicolons
+  // inside string literals do not falsely flag as multi-statement.
+  if (stripStringsAndComments(trimmed).includes(";")) {
     throw new Error("Only a single SQL statement per call is allowed");
   }
   return trimmed;
@@ -227,7 +249,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "update_task_step",
       description:
-        "Transition a task to a new workflow step (scout/plan/plan-review/dev/test/review/commit/done). Appends to history JSONB. Used by autopilot — typically called twice per iteration: once on entry (outcome=null) and once on completion (outcome=<verdict>, signature=<hex>). The 'dev' step increments tasks.iteration only on entry (when outcome is null); plan_iter is tracked outside the brain (on disk). Signatures are persisted so stuck-loop windows can be reconstructed on resume.",
+        "Transition a task to a new workflow step (scout/plan/plan-review/dev/test/review/commit/done). Appends a row to task_events. Used by autopilot — typically called twice per iteration: once on entry (outcome=null) and once on completion (outcome=<verdict>, signature=<hex>). The 'dev' step increments tasks.iteration only on COMPLETION (so a crash between entry and completion does not skip an iter on resume). Signatures are persisted so stuck-loop windows can be reconstructed on resume by querying task_events.",
       inputSchema: {
         type: "object",
         properties: {
@@ -236,8 +258,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           agent: { type: "string", description: "Which agent caused this transition" },
           outcome: { type: "string", description: "Null on entry; one of complete / pass / fail / approve / request-changes / blocked on completion." },
           report_ref: { type: "string", description: "Pointer to the artifact file under .lmd/autopilot/<agent>/<task_id>[-<iter>].md" },
-          signature: { type: "string", description: "16-hex short signature returned by the sub-agent. Pass only on completion calls — persisted in history for stuck-loop reconstruction on resume." },
-          iter: { type: "number", description: "plan_iter or dev_iter — recorded in history so resume can hydrate windows ordered by iter without scanning timestamps." },
+          signature: { type: "string", description: "16-hex short signature returned by the sub-agent. Pass only on completion calls — persisted in task_events for stuck-loop reconstruction on resume." },
+          iter: { type: "number", description: "plan_iter or dev_iter — recorded in task_events so resume can hydrate windows ordered by iter without scanning timestamps." },
         },
         required: ["id", "step", "agent"],
       },
@@ -245,12 +267,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "complete_task",
       description:
-        "Mark a task as done. Sets status='done', completed_at=now, appends to history.",
+        "Mark a task as done. Sets status='done', completed_at=now, appends a 'complete' row to task_events.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "string" },
           commit_sha: { type: "string" },
+        },
+        required: ["id"],
+      },
+    },
+
+    {
+      name: "cancel_task",
+      description:
+        "Mark a task as cancelled. Sets status='cancelled', appends a 'cancel' row to task_events. Used by autopilot on user interrupt; the in-flight sub-agent is not awaited.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          reason: { type: "string" },
         },
         required: ["id"],
       },
@@ -264,13 +300,14 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === "query") {
     const raw = String(args?.sql ?? "");
     const sql = ensureSingleStatement(raw);
-    if (!SELECT_START_RE.test(sql)) {
+    const scrubbed = stripStringsAndComments(sql);
+    if (!SELECT_START_RE.test(scrubbed)) {
       throw new Error("query tool only allows SELECT or read-only WITH");
     }
-    if (FORBIDDEN_RE.test(sql)) {
+    if (FORBIDDEN_RE.test(scrubbed)) {
       throw new Error("Forbidden statement (DDL / privilege change detected)");
     }
-    if (/\b(INSERT|UPDATE|DELETE)\b/i.test(sql)) {
+    if (WRITE_KEYWORD_RE.test(scrubbed)) {
       throw new Error("Use the `execute` tool for write statements");
     }
     const r = await pool.query({ text: sql, rowMode: "object" });
@@ -285,10 +322,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === "execute") {
     const raw = String(args?.sql ?? "");
     const sql = ensureSingleStatement(raw);
-    if (!WRITE_START_RE.test(sql)) {
+    const scrubbed = stripStringsAndComments(sql);
+    if (!WRITE_START_RE.test(scrubbed)) {
       throw new Error("execute tool only allows INSERT/UPDATE/DELETE/WITH");
     }
-    if (FORBIDDEN_RE.test(sql)) {
+    if (FORBIDDEN_RE.test(scrubbed)) {
       throw new Error("Forbidden DDL or privilege statement");
     }
     const r = await pool.query(sql);
@@ -450,14 +488,32 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const a = args ?? {};
     if (!a.id || !a.claimer) throw new Error("id and claimer are required");
     const guard = a.force ? "TRUE" : "(claimed_by IS NULL OR claimed_by = $2)";
+    // Capture the prior owner so we can log 'transfer' vs 'claim' correctly.
     const r = await pool.query(
-      `UPDATE tasks
-         SET claimed_by = $2, claimed_at = now(), status = 'claimed',
-             history = history || jsonb_build_object('event','claim','by',$2,'at',now()),
-             updated_at = now()
-       WHERE id = $1 AND ${guard}
-       RETURNING id, claimed_by, claimed_at`,
-      [a.id, a.claimer],
+      `WITH prior AS (
+         SELECT claimed_by AS prev_owner FROM tasks WHERE id = $1
+       ),
+       upd AS (
+         UPDATE tasks
+            SET claimed_by = $2, claimed_at = now(), status = 'claimed',
+                updated_at = now()
+          WHERE id = $1 AND ${guard}
+          RETURNING id, claimed_by, claimed_at
+       ),
+       ev AS (
+         INSERT INTO task_events (task_id, kind, actor, payload)
+         SELECT upd.id,
+                CASE
+                  WHEN prior.prev_owner IS NOT NULL AND prior.prev_owner <> $2 THEN 'transfer'
+                  ELSE 'claim'
+                END,
+                $2,
+                jsonb_build_object('forced', $3::boolean, 'prev_owner', prior.prev_owner)
+         FROM upd, prior
+         RETURNING 1
+       )
+       SELECT * FROM upd`,
+      [a.id, a.claimer, !!a.force],
     );
     if (r.rowCount === 0) {
       const owner = await pool.query("SELECT claimed_by FROM tasks WHERE id = $1", [a.id]);
@@ -471,13 +527,21 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!a.id || !a.claimer) throw new Error("id and claimer are required");
     const guard = a.force ? "TRUE" : "claimed_by = $2";
     const r = await pool.query(
-      `UPDATE tasks
-         SET claimed_by = NULL, claimed_at = NULL, status = 'pending',
-             history = history || jsonb_build_object('event','unclaim','by',$2,'at',now(),'reason',$3::text),
-             updated_at = now()
-       WHERE id = $1 AND ${guard}
-       RETURNING id`,
-      [a.id, a.claimer, a.reason ?? null],
+      `WITH upd AS (
+         UPDATE tasks
+            SET claimed_by = NULL, claimed_at = NULL, status = 'pending',
+                updated_at = now()
+          WHERE id = $1 AND ${guard}
+          RETURNING id
+       ),
+       ev AS (
+         INSERT INTO task_events (task_id, kind, actor, reason, payload)
+         SELECT upd.id, 'unclaim', $2, $3, jsonb_build_object('forced', $4::boolean)
+         FROM upd
+         RETURNING 1
+       )
+       SELECT * FROM upd`,
+      [a.id, a.claimer, a.reason ?? null, !!a.force],
     );
     return asText({ unclaimed: r.rowCount > 0 });
   }
@@ -485,27 +549,38 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === "update_task_step") {
     const a = args ?? {};
     if (!a.id || !a.step || !a.agent) throw new Error("id, step, agent are required");
-    // Iteration bumps only on the ENTRY call (outcome null) for the 'dev' step.
-    // Completion calls (outcome != null) carry the signature and never re-bump.
+    // Iteration bumps on the COMPLETION call (outcome != null) of the 'dev' step,
+    // never on entry. This protects against crashes between entry and completion:
+    // an orphan entry-only event leaves iteration unchanged so resume can re-run
+    // the same iter without skipping a number.
     const isEntry = a.outcome == null || a.outcome === "";
-    const incIter = a.step === "dev" && isEntry ? 1 : 0;
+    const bumpIter = a.step === "dev" && !isEntry;
     const r = await pool.query(
-      `UPDATE tasks
-         SET current_step = $2,
-             iteration = iteration + $3,
-             status = CASE WHEN $2 = 'done' THEN 'done' ELSE 'active' END,
-             history = history || jsonb_build_object(
-               'step', $2, 'iteration', iteration + $3, 'at', now(),
-               'agent', $4::text, 'outcome', $5::text, 'report_ref', $6::text,
-               'signature', $7::text, 'iter', $8::int
-             ),
-             updated_at = now()
-       WHERE id = $1
-       RETURNING current_step, iteration, status`,
+      `WITH upd AS (
+         UPDATE tasks
+            SET current_step = $2,
+                iteration = iteration + CASE WHEN $8::boolean THEN 1 ELSE 0 END,
+                status = CASE WHEN $2 = 'done' THEN 'done' ELSE 'active' END,
+                updated_at = now()
+          WHERE id = $1
+          RETURNING id, current_step, iteration, status
+       ),
+       ev AS (
+         INSERT INTO task_events (task_id, kind, step, iter, agent, outcome, signature, report_ref)
+         SELECT upd.id, 'step', $2, $7::int, $3::text, $4::text, $6::text, $5::text
+         FROM upd
+         RETURNING 1
+       )
+       SELECT current_step, iteration, status FROM upd`,
       [
-        a.id, a.step, incIter, a.agent,
-        a.outcome ?? null, a.report_ref ?? null,
-        a.signature ?? null, a.iter ?? null,
+        a.id,                          // $1
+        a.step,                        // $2
+        a.agent,                       // $3
+        a.outcome ?? null,             // $4
+        a.report_ref ?? null,          // $5
+        a.signature ?? null,           // $6
+        a.iter ?? null,                // $7
+        bumpIter,                      // $8
       ],
     );
     return asText({ updated: r.rows[0] ?? null });
@@ -515,15 +590,45 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const a = args ?? {};
     if (!a.id) throw new Error("id is required");
     const r = await pool.query(
-      `UPDATE tasks
-         SET status = 'done', current_step = 'done', completed_at = now(),
-             history = history || jsonb_build_object('event','completed','at',now(),'commit',$2::text),
-             updated_at = now()
-       WHERE id = $1
-       RETURNING id, completed_at`,
+      `WITH upd AS (
+         UPDATE tasks
+            SET status = 'done', current_step = 'done', completed_at = now(),
+                updated_at = now()
+          WHERE id = $1
+          RETURNING id, completed_at
+       ),
+       ev AS (
+         INSERT INTO task_events (task_id, kind, payload)
+         SELECT upd.id, 'complete', jsonb_build_object('commit_sha', $2::text)
+         FROM upd
+         RETURNING 1
+       )
+       SELECT * FROM upd`,
       [a.id, a.commit_sha ?? null],
     );
     return asText({ completed: r.rows[0] ?? null });
+  }
+
+  if (name === "cancel_task") {
+    const a = args ?? {};
+    if (!a.id) throw new Error("id is required");
+    const r = await pool.query(
+      `WITH upd AS (
+         UPDATE tasks
+            SET status = 'cancelled', updated_at = now()
+          WHERE id = $1 AND status NOT IN ('done', 'cancelled')
+          RETURNING id, status
+       ),
+       ev AS (
+         INSERT INTO task_events (task_id, kind, reason)
+         SELECT upd.id, 'cancel', $2::text
+         FROM upd
+         RETURNING 1
+       )
+       SELECT * FROM upd`,
+      [a.id, a.reason ?? null],
+    );
+    return asText({ cancelled: r.rows[0] ?? null });
   }
 
   throw new Error(`Unknown tool: ${name}`);

@@ -16,14 +16,14 @@ Releases ownership of a task. Sets `claimed_by = NULL`, `claimed_at = NULL`, sta
 1. **Resolve current user**: `git config user.email`.
 2. **Parse args**:
    - Positional: `<task-id>` (required)
-   - `--reason <text>` — optional note added to `history`
+   - `--reason <text>` — optional note recorded with the `unclaim` event in `task_events`
 3. **Validate**:
    - Task exists.
    - `claimed_by = me` — cannot unclaim someone else's task. That's transfer, use `/lmd:claim-task <id> --force`.
-4. **Unclaim** — call `mcp__brain__unclaim_task({ id, claimer, reason })`. The MCP tool runs the `UPDATE` with `WHERE claimed_by = $claimer` and appends an `unclaim` event to `history`.
+4. **Unclaim** — call `mcp__brain__unclaim_task({ id, claimer, reason })`. The MCP tool runs the `UPDATE` with `WHERE claimed_by = $claimer` and appends an `unclaim` row to `task_events`.
 5. **If 0 rows affected** → either task doesn't exist or claimed_by ≠ me. Report.
 
-Status is always set to `pending` (no soft-block mode). Use `--reason` to explain in `history`; if the task is truly blocked, autopilot would have already set `status = 'blocked'`.
+Status is always set to `pending` (no soft-block mode). Use `--reason` to leave an audit note; if the task is truly blocked, autopilot would have already set `status = 'blocked'`.
 
 Any in-flight autopilot is not stopped by unclaim — it will detect the status change on its next iteration and exit cleanly (per autopilot's cancellation rules).
 
