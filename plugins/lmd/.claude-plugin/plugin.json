@@ -3,7 +3,13 @@
   "displayName": "Let Me Do",
   "version": "0.1.0",
   "description": "Autopilot pipeline (scouter → code-planner ⇄ plan-reviewer → developer ⇄ tester → reviewer ⇄ developer → committer) that drives a single task from intake to commit. All agent-to-agent context flows through files under `.lmd/autopilot/`; the main agent holds only short status payloads. Backed by 'brain', a Postgres graph + task store shared across sessions.",
-  "author": { "name": "Duy Nguyen" },
+  "author": {
+    "name": "Duy Nguyen",
+    "email": "duynguyen.hd.2903@gmail.com",
+    "url": "https://github.com/nhduy12"
+  },
+  "homepage": "https://github.com/nhduy12/let-me-do",
+  "repository": "https://github.com/nhduy12/let-me-do",
   "license": "MIT",
   "keywords": ["claude-code", "agents", "automation", "mcp", "postgres", "graph", "memory"],
 

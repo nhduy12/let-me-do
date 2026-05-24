@@ -5,8 +5,8 @@ This repository is a Claude Code [plugin marketplace](https://code.claude.com/do
 ## Install
 
 ```bash
-# 1. Add this marketplace (replace <github-user> with the repo owner)
-claude plugin marketplace add <github-user>/let-me-do
+# 1. Add this marketplace
+claude plugin marketplace add nhduy12/let-me-do
 
 # 2. Install the plugin
 claude plugin install lmd@let-me-do --scope project

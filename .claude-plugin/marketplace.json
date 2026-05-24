@@ -1,10 +1,12 @@
 {
   "name": "let-me-do",
   "owner": {
-    "name": "Duy Nguyen"
+    "name": "Duy Nguyen",
+    "email": "duynguyen.hd.2903@gmail.com",
+    "url": "https://github.com/nhduy12"
   },
   "metadata": {
-    "description": "Single-plugin marketplace for `lmd` (let-me-do). Add via `claude plugin marketplace add <github-user>/let-me-do`, then install with `claude plugin install lmd@let-me-do`.",
+    "description": "Single-plugin marketplace for `lmd` (let-me-do). Add via `claude plugin marketplace add nhduy12/let-me-do`, then install with `claude plugin install lmd@let-me-do`.",
     "version": "0.1.0"
   },
   "plugins": [
@@ -26,7 +28,7 @@
         "task-runner",
         "playwright"
       ],
-      "homepage": "https://github.com/duynguyen-hd/let-me-do",
+      "homepage": "https://github.com/nhduy12/let-me-do",
       "license": "MIT",
       "strict": true
     }

@@ -57,8 +57,8 @@ The repo is both a **marketplace** and a **plugin** — `.claude-plugin/marketpl
 ### From GitHub (recommended)
 
 ```bash
-# 1. Add the marketplace (replace <github-user> with the repo owner)
-claude plugin marketplace add <github-user>/let-me-do
+# 1. Add the marketplace
+claude plugin marketplace add nhduy12/let-me-do
 
 # 2. Install the plugin
 claude plugin install lmd@let-me-do --scope project
