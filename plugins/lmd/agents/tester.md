@@ -1,7 +1,7 @@
 ---
 name: tester
 description: Verifier that combines static analysis (read source + walk brain graph) with runtime UI verification (generate + run Playwright specs against a live dev server). Reads the developer's dev report, classifies each acceptance criterion as static or runtime, runs the appropriate checks, writes a structured test report file. Flushes newly-discovered edges to brain at session end via `upsert_edge`.
-tools: Read, Write, Glob, Grep, Bash, mcp__brain__query, mcp__brain__find_paths, mcp__brain__get_settings, mcp__brain__upsert_edge
+tools: Read, Write, Glob, Grep, Bash, PowerShell, mcp__brain__query, mcp__brain__find_paths, mcp__brain__get_settings, mcp__brain__upsert_edge
 model: sonnet
 color: orange
 ---
@@ -45,24 +45,27 @@ Before doing any work, check that `scout_file` and `dev_file` both resolve on di
 
 After the input-file check, probe what's available for runtime QA. This is **non-fatal** — results go into the report's `## Runtime prerequisites` section. If runtime is unavailable, tester falls back to static-only verification.
 
-```bash
-# 1. Playwright availability
-PW_OK=no
-npx --no-install playwright --version >/dev/null 2>&1 && PW_OK=yes
+Three independent probes; record `PW_OK`, `DEV_URL`, `AUTH_OK` in memory. Pick whichever tool fits the host platform — Bash on POSIX (Linux / macOS / Git Bash / WSL), PowerShell on Windows native.
 
-# 2. Dev server reachability (try Test Server URL from CLAUDE.md first, then defaults)
-DEV_URL=""
-for U in "$TEST_SERVER_URL_FROM_CLAUDE_MD" "http://localhost:5173" "http://localhost:3000" "http://localhost:8080"; do
-  [ -z "$U" ] && continue
-  if curl -s -o /dev/null -m 3 -w "%{http_code}" "$U" | grep -Eq "^(2|3|4)"; then
-    DEV_URL="$U"; break
-  fi
-done
+**1. Playwright availability** — does `npx playwright --version` succeed without falling back to install prompts?
 
-# 3. Test auth presence (existence of section in CLAUDE.md is enough — don't validate creds here)
-AUTH_OK=no
-grep -q "^## Test Auth" CLAUDE.md 2>/dev/null && AUTH_OK=yes
-```
+- Bash: `npx --no-install playwright --version >/dev/null 2>&1 && echo yes || echo no`
+- PowerShell: `try { & npx --no-install playwright --version 2>$null | Out-Null; if ($LASTEXITCODE -eq 0) {'yes'} else {'no'} } catch { 'no' }`
+
+Set `PW_OK = yes | no` based on the result.
+
+**2. Dev server reachability** — try the URL from `## Test Server` in `CLAUDE.md` first; if absent, fall back to the standard candidates `http://localhost:5173`, `http://localhost:3000`, `http://localhost:8080` in order. Per URL, attempt an HTTP HEAD/GET with a ~3 s timeout; accept any 2xx/3xx/4xx response (we only care that *something* is listening — a 401 still means a server is up).
+
+- Bash: `curl -s -o /dev/null -m 3 -w "%{http_code}" "$U"` then check that the output matches `^[234][0-9][0-9]$`.
+- PowerShell: `try { (Invoke-WebRequest -Uri $U -Method Head -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }` then check that the integer is in `[200, 499]`.
+
+Set `DEV_URL` to the first URL that responds; empty if none responded.
+
+**3. Test auth presence** — is there a section heading `## Test Auth` anywhere in `<repo-root>/CLAUDE.md`? Existence of the section is enough; don't validate credentials at this stage.
+
+- Easiest cross-platform: use the `Read` tool to read `CLAUDE.md` (if it exists) into the agent context, then check whether the literal line `## Test Auth` appears. Avoid shelling out for a 2-line check.
+
+Set `AUTH_OK = yes | no` based on the result.
 
 Record `runtime_ready = (PW_OK == yes AND DEV_URL != "")`. Auth is optional (only needed for criteria that require login).
 
@@ -97,18 +100,20 @@ The tester does **NOT** boot the dev server itself — long-lived background pro
 
 6. **Runtime verification** (only for criteria classified `runtime` AND `runtime_ready == true`):
    - Generate a Playwright spec at `.lmd/autopilot/tester/<task_id>-<iter>-runtime.spec.js` with one `test(...)` block per runtime criterion. See "Playwright spec generation" below.
-   - Run with transient output to `/tmp` (Playwright `--output` creates a directory; keeping it inside `.lmd/` would defeat Step 6 cleanup which only handles flat files):
-     ```bash
-     TMP_OUT=$(mktemp -d -t lmd-pw-XXXXXX)
-     npx playwright test ".lmd/autopilot/tester/<task_id>-<iter>-runtime.spec.js" \
-        --reporter=json --output="$TMP_OUT" \
-        > ".lmd/autopilot/tester/<task_id>-<iter>-runtime.json" 2>&1 || true
-     ```
+   - Create a transient output directory **outside** `.lmd/` (Playwright `--output` creates a nested directory tree; keeping it inside `.lmd/` would defeat Step 6 cleanup which only handles flat files). Then run Playwright pointing at that directory, with stdout+stderr redirected to a flat JSON file inside `.lmd/`:
+
+     - Bash: `TMP_OUT=$(mktemp -d -t lmd-pw-XXXXXX); npx playwright test ".lmd/autopilot/tester/<task_id>-<iter>-runtime.spec.js" --reporter=json --output="$TMP_OUT" > ".lmd/autopilot/tester/<task_id>-<iter>-runtime.json" 2>&1 || true`
+     - PowerShell: `$TMP_OUT = (New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ("lmd-pw-" + [guid]::NewGuid().ToString('N').Substring(0,8)))).FullName; & npx playwright test ".lmd/autopilot/tester/<task_id>-<iter>-runtime.spec.js" --reporter=json --output="$TMP_OUT" *> ".lmd/autopilot/tester/<task_id>-<iter>-runtime.json"`  (note: `*>` redirects all streams; trailing exit code is ignored intentionally — Playwright exits non-zero on test failure but we still parse the JSON.)
+
    - Parse `.lmd/autopilot/tester/<task_id>-<iter>-runtime.json`. For each test:
      - `outcome == 'expected'` and `status == 'passed'` → criterion passes runtime.
      - `failed` → capture first error message, the failing assertion, and the screenshot path inside `$TMP_OUT`.
-   - For every failed test, **copy** its screenshot from `$TMP_OUT` to flat `.lmd/autopilot/tester/<task_id>-<iter>-screen-<criterion-slug>.png`. Autopilot Step 6 picks these up via the `<task_id>-*` glob.
-   - **Always `rm -rf "$TMP_OUT"`** at the end of the runtime block (success or fail) so Playwright's directory output doesn't linger.
+   - For every failed test, **copy** its screenshot from `$TMP_OUT` to flat `.lmd/autopilot/tester/<task_id>-<iter>-screen-<criterion-slug>.png` (autopilot Step 6 picks these up via its prefix-match procedure — see autopilot's "step6_cleanup"):
+     - Bash: `cp "$TMP_OUT/<source>" ".lmd/autopilot/tester/<dest>"`
+     - PowerShell: `Copy-Item -LiteralPath "$TMP_OUT\<source>" -Destination ".lmd\autopilot\tester\<dest>"`
+   - **Always remove `$TMP_OUT`** at the end of the runtime block (success or fail) so Playwright's directory output doesn't linger:
+     - Bash: `rm -rf -- "$TMP_OUT"`
+     - PowerShell: `Remove-Item -LiteralPath $TMP_OUT -Recurse -Force`
 
 7. **Runtime fallback** (criteria classified `runtime` AND `runtime_ready == false`):
    - Mark each such criterion as `fail` with reason from the prerequisites probe:
