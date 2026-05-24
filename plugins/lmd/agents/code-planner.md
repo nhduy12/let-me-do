@@ -24,16 +24,18 @@ prior_plan_review_file: .lmd/autopilot/plan-reviewer/<task_id>-<N-1>.md  # optio
 
 ## Step 0 — MANDATORY context scan (always run first)
 
-Follow the 5-step procedure in `conventions/context-scan.md` (relative to plugin root).
+Load context explicitly at the start of every invocation:
 
-**Code-planner addendum** (after step 5): query brain for ~3-5 nodes per scope to absorb naming + structure patterns the plan must conform to:
+1. **Always read** `<repo-root>/CLAUDE.md`. If absent, note that fact and continue.
+2. **Always read** every file under `<repo-root>/.claude/rules/*.md` if the folder exists.
+3. **Read task** from brain via `mcp__brain__query` — title, summary, acceptance_criteria, related_node_ids, type.
+4. **Derive scope(s)** from the task's `summary` first line `Scope: <value>` convention. May be ` + `-joined (literal spaces). Split on ` + `.
+5. **Walk nested `CLAUDE.md`** in each scope's folder. Read every match. These define architectural patterns the plan must conform to.
+6. **Query brain** for ~3-5 nodes per scope (`SELECT id, label, type, description FROM nodes WHERE app = $scope ORDER BY label LIMIT 5`) to absorb naming + structure patterns. Repeat per constituent scope.
 
-```sql
-SELECT id, label, type, description FROM nodes
-WHERE app = $scope ORDER BY label LIMIT 5;
-```
+Conflict resolution: nested `CLAUDE.md` overrides root for the code inside that folder. Documented convention wins over personal preference.
 
-Repeat per constituent scope.
+For a preview of what will load: run `/lmd:scan-context --scope <scope>`.
 
 ## Pre-flight — verify required input files exist
 

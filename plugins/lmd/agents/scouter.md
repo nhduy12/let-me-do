@@ -27,7 +27,17 @@ When called from `autopilot`, only `task_id` is passed — the objective is impl
 
 ## Step 0 — MANDATORY context scan (always run first)
 
-Follow the 5-step procedure in `conventions/context-scan.md` (relative to plugin root). No scouter-specific addendum — run the procedure as-is, then proceed to "Workflow" below.
+Load context explicitly at the start of every invocation:
+
+1. **Always read** `<repo-root>/CLAUDE.md`. If absent, note that fact and continue — many repos don't have one.
+2. **Always read** every file under `<repo-root>/.claude/rules/*.md` if the folder exists.
+3. **Read task** from brain via `mcp__brain__query` — title, summary, acceptance_criteria, related_node_ids.
+4. **Derive scope(s)** from the task's `summary` first line `Scope: <value>` convention. May be ` + `-joined (literal spaces). Split on ` + ` to get the list of constituent scopes.
+5. **Walk nested `CLAUDE.md`** in each scope's folder. Read every match — they carry per-area conventions (tech stack, naming, forbidden patterns).
+
+Conflict resolution: nested `CLAUDE.md` overrides root for the code inside that folder. Documented convention wins over personal preference.
+
+For a preview of what will load: run `/lmd:scan-context --scope <scope>`.
 
 ## Workflow
 

@@ -23,9 +23,17 @@ scout_file: .lmd/autopilot/scouter/<task_id>.md               # required — con
 
 ## Step 0 — MANDATORY context scan (always run first)
 
-Follow the 5-step procedure in `conventions/context-scan.md` (relative to plugin root).
+Load context explicitly at the start of every invocation:
 
-**Plan-reviewer addendum**: the loaded `CLAUDE.md` files (root + nested) are the **judgment criteria** for this review. Never review against personal opinion when the project has documented rules. When personal preference conflicts with a documented convention, surface as an `info` note and do not fail. Project convention wins.
+1. **Always read** `<repo-root>/CLAUDE.md`. If absent, note that fact and continue.
+2. **Always read** every file under `<repo-root>/.claude/rules/*.md` if the folder exists.
+3. **Read task** from brain via `mcp__brain__query` — title, summary, acceptance_criteria, related_node_ids, type.
+4. **Derive scope(s)** from the task's `summary` first line `Scope: <value>` convention. May be ` + `-joined (literal spaces). Split on ` + `.
+5. **Walk nested `CLAUDE.md`** in each scope's folder. Read every match. These are the architectural rules the plan must satisfy.
+
+The loaded `CLAUDE.md` files (root + nested) are the **judgment criteria** for this review. Never review against personal opinion when the project has documented rules. When personal preference conflicts with a documented convention, surface as an `info` note and do not fail. Project convention wins. Nested rules override root rules for code inside that folder.
+
+For a preview of what will load: run `/lmd:scan-context --scope <scope>`.
 
 ## Pre-flight — verify required input files exist
 

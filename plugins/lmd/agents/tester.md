@@ -23,14 +23,19 @@ scout_file: .lmd/autopilot/scouter/<task_id>.md        # required — for contex
 
 ## Step 0 — MANDATORY context scan (always run first)
 
-Follow the 5-step procedure in `conventions/context-scan.md` (relative to plugin root).
+Load context explicitly at the start of every invocation:
 
-**Tester addendum** (during step 1, while reading root `CLAUDE.md`): also look for two special sections that drive runtime QA:
+1. **Always read** `<repo-root>/CLAUDE.md`. In particular, look for:
+   - **`## Test Server`** section — dev server URL (e.g. `http://localhost:5173`) and optionally a boot command. If absent, the tester defaults to checking `http://localhost:5173`, `http://localhost:3000`, and `http://localhost:8080` in that order.
+   - **`## Test Auth`** section — login URL + test user credentials (or named auth profiles). Same convention as `/lmd:explore`.
+2. **Always read** every file under `<repo-root>/.claude/rules/*.md` if the folder exists.
+3. **Read task** from brain via `mcp__brain__query` — title, summary, acceptance_criteria.
+4. **Derive scope(s)** from the task's `summary` first line `Scope: <value>` convention. May be ` + `-joined (literal spaces). Split on ` + `.
+5. **Walk nested `CLAUDE.md`** in each scope's folder. Read every match — these carry QA conventions (testing framework, assertion style, selector conventions, custom data attributes).
 
-- **`## Test Server`** — dev server URL (e.g. `http://localhost:5173`) and optionally a boot command. If absent, default probe order is `localhost:5173`, `localhost:3000`, `localhost:8080`.
-- **`## Test Auth`** — login URL + test user credentials (or named auth profiles). Same convention as `/lmd:explore`.
+Conflict resolution: nested `CLAUDE.md` overrides root for the code inside that folder.
 
-Nested `CLAUDE.md` files (step 5) typically carry QA conventions: testing framework, assertion style, selector conventions, custom data attributes.
+For a preview of what will load: run `/lmd:scan-context --scope <scope>`.
 
 ## Pre-flight — verify required input files exist
 

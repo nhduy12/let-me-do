@@ -30,7 +30,11 @@ Two independent iteration counters, both reconstructed from `task_events` on res
 
 ## Task ids contain `[scope]`
 
-Task ids like `20260524-001-[lms]-fix-login` contain `[` and `]`, which are special in shell glob patterns. **Never** use unquoted globs against task ids. Inside Bash, always loop with literal string comparison (`[ "$a" = "$b" ]` or `${var:0:N}` substring), never `case`/`[[ ]]` glob matching against ids.
+Task ids like `20260524-001-[lms]-fix-login` contain `[` and `]`, which are special in shell glob patterns AND in Claude Code's `Glob` tool pattern syntax. **Never** match task ids via globs. The only safe approaches:
+
+- Inside the `Bash` tool: literal string comparison (`[ "$a" = "$b" ]`) or substring slicing (`${var:0:N}`); never `case` / `[[ ]]` glob matching.
+- Inside PowerShell: `-eq` / `.StartsWith()` / `.Substring()` on plain strings; never `-like` (uses globs).
+- Inside the `Glob` tool: list the parent directory with a generic pattern (e.g. `.lmd/autopilot/scouter/*`) and then filter the result list via literal string comparison in your own logic. Do not pass the task id into the `Glob` pattern itself.
 
 ## When invoked
 
@@ -67,10 +71,21 @@ Steps below run sequentially before the workflow starts. They make fresh-start a
 
 ### 2. Ensure directories
 
-```bash
-mkdir -p .lmd/autopilot/scouter .lmd/autopilot/code-planner .lmd/autopilot/plan-reviewer \
-         .lmd/autopilot/developer .lmd/autopilot/tester .lmd/autopilot/reviewer
-```
+Ensure all six artifact directories exist under `<repo-root>/.lmd/autopilot/`:
+
+- `.lmd/autopilot/scouter/`
+- `.lmd/autopilot/code-planner/`
+- `.lmd/autopilot/plan-reviewer/`
+- `.lmd/autopilot/developer/`
+- `.lmd/autopilot/tester/`
+- `.lmd/autopilot/reviewer/`
+
+Pick the platform-appropriate tool — Claude Code provides both:
+
+- POSIX shells (Linux / macOS / Git Bash / WSL) via `Bash` tool: `mkdir -p` with all six paths in one call.
+- Windows native via `PowerShell` tool: `New-Item -ItemType Directory -Force -Path <path>` per directory (no `-p` flag; `-Force` is idempotent).
+
+Idempotency requirement: re-running this step must not fail if any directory already exists.
 
 ### 3. Initialize state to defaults
 
@@ -278,7 +293,11 @@ extract_iter(path):
   return null
 ```
 
-The "strip leading prefix" must be done with literal substring comparison, not glob/regex, because task_id contains `[scope]`. In Bash: `${name#${task_id}-}` does literal prefix removal (the `#` parameter expansion treats `[` as a literal character because there's no quoting issue inside the expansion — but wait, `#` parameter expansion IS pattern-based and `[` IS special). Safer in Bash: use length-based substring: `"${name:${#task_id}+1}"`.
+The "strip leading prefix" step uses literal substring comparison only — never glob, regex, or shell pattern expansion — because task_id contains `[scope]`. Implementation per platform:
+
+- POSIX `Bash`: length-based substring slicing — `"${name:$((${#task_id}+1))}"`. Do NOT use `${name#${task_id}-}` (pattern-based removal — `[` is special there).
+- Windows `PowerShell`: `$name.Substring($task_id.Length + 1)` after a `.StartsWith($task_id + '-')` guard.
+- Plain string operations in any in-memory parsing — preferred over invoking a shell at all when feasible.
 
 ## Two `update_task_step` calls per iteration
 
@@ -584,29 +603,23 @@ FALL THROUGH to step6_cleanup
 
 Delete this task's artifact files only. Subdirectories stay. Other parallel-session tasks are not touched.
 
-Use a Bash loop that compares paths via literal string operations — never globs — because task ids contain `[scope]`:
+**Procedure (platform-neutral):**
 
-```bash
-TID="<task_id>"                              # literal, may contain [scope]
-PREFIX_LEN=$(( ${#TID} + 1 ))                # length of "<task_id>-"
+1. For each of the six sub-directories — `scouter`, `code-planner`, `plan-reviewer`, `developer`, `tester`, `reviewer`:
+   1. Use the `Glob` tool with a **generic** pattern that does NOT contain the task id: `.lmd/autopilot/<sub>/*` (recall task ids contain `[scope]` which is special in glob patterns).
+   2. Walk the returned list of paths in memory. For each path:
+      - Extract the basename (the final path component).
+      - Match by **literal string comparison** (not regex, not glob):
+        - exact match: `basename == "<task_id>.md"` (this is the scouter case — no iter suffix)
+        - prefix match: `basename` starts with `"<task_id>-"` (the rest can be anything: an integer iter like `3`, or `3-devfeedback`)
+      - If neither match, skip.
+   3. Delete each matched file via whichever tool is appropriate for the platform:
+      - POSIX: `Bash` tool, `rm -f -- "<path>"` per file (or batched).
+      - Windows native: `PowerShell` tool, `Remove-Item -Force -LiteralPath "<path>"` per file (`-LiteralPath` is critical — it disables wildcard interpretation, which is what we need for paths containing `[scope]`).
 
-for SUB in scouter code-planner plan-reviewer developer tester reviewer; do
-  DIR=".lmd/autopilot/$SUB"
-  [ -d "$DIR" ] || continue
-  for F in "$DIR"/*; do
-    [ -f "$F" ] || continue
-    NAME="${F##*/}"
-    # Match exactly "<task_id>.md" (scouter case) or anything starting with "<task_id>-"
-    if [ "$NAME" = "${TID}.md" ] || [ "${NAME:0:${PREFIX_LEN}}" = "${TID}-" ]; then
-      rm -f -- "$F"
-    fi
-  done
-done
-```
+2. **Never** construct a deletion command whose path argument contains the task id concatenated with a wildcard (e.g. `rm .lmd/autopilot/scouter/<task_id>*`) — `[` and `]` in the id WILL be interpreted as a character class by the shell. The walk-and-literal-compare procedure above avoids this entirely.
 
-The `${NAME:0:${PREFIX_LEN}}` substring expansion is plain string slicing — no glob interpretation. This is the only safe way to match task ids containing `[scope]` in bash.
-
-After cleanup, output paths are no longer dereferenceable; they're informational in the return report below.
+After cleanup, output paths in the return report (below) are no longer dereferenceable; they're informational.
 
 ## Sub-agent return contracts (what autopilot receives)
 
@@ -676,4 +689,4 @@ If `terminal_state == 'done'` and Step 6 ran, the file paths above point to dele
 - Don't call `mcp__brain__claim_task` outside the preflight self-claim path.
 - Don't bypass plan/dev/review caps except via `--no-cap`. Committer cap stays at 1; recovery cap stays at 3.
 - Don't spawn subagents in parallel within this loop — sequential only.
-- Don't use bash globs / `case` / `[[ ]]` pattern matching against task ids (they contain `[scope]`). Use literal string ops (`[ "$a" = "$b" ]`, `${var:0:N}`).
+- Don't use bash globs / `case` / `[[ ]]` pattern matching against task ids, nor PowerShell `-like`, nor `Glob`-tool patterns that embed the task id. They all interpret `[scope]` as a character class. Use literal string ops only — see "Task ids contain `[scope]`" at the top.
