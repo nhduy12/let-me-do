@@ -170,15 +170,14 @@ For runtime verification to work, three prerequisites must exist:
    npx playwright install
    ```
 2. **A dev server reachable** when autopilot runs. Tester does NOT boot the server itself — start it manually before claiming a runtime-heavy task.
-3. **A `.lmd/test-env.md` file at repo root**, with `## Test Server` (dev URL) and optionally `## Test Auth` (login URL + named test users). This is the **only** source of test-env config — there is no fallback to default ports or to `CLAUDE.md` sections.
+3. **A `.lmd/test-env.md` file at repo root** describing your dev server URL(s) and test users. The format is **free-form Markdown** — tester reads it as an LLM and picks out the info. There is no strict schema; just be unambiguous. Single-server projects need one URL + a login section. Multi-server (monorepo, FE+BE split) projects name the servers so tester can map scope → server. See `plugins/lmd/templates/test-env.md.example` for both shapes.
 
-Copy `plugins/lmd/templates/test-env.md.example` to `<your-project>/.lmd/test-env.md` and fill in the values. Format example:
+Minimal single-server example:
 
 ```markdown
 ## Test Server
 
 Dev server: http://localhost:5173
-Start command: npm run dev
 
 ## Test Auth
 

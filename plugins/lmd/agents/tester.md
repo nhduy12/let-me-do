@@ -36,39 +36,80 @@ Conflict resolution: nested `CLAUDE.md` overrides root for the code inside that 
 
 For a preview of what will load: run `/lmd:scan-context --scope <scope>`.
 
-## Test-env file format (`<repo-root>/.lmd/test-env.md`)
+## Test-env file (`<repo-root>/.lmd/test-env.md`)
 
-Single Markdown file with two well-known sections. Either section may be omitted; tester degrades cleanly when one is missing.
+Free-form Markdown. Tester is an LLM and will pick out the information it needs as long as the file is reasonably structured and unambiguous. There is no strict schema — write what makes sense for your project.
+
+What tester looks for:
+
+- **One or more dev servers**, each with a URL. If you have multiple servers (vd lms + crm in a monorepo, frontend + backend split), give each a **name** that matches the corresponding task scope so the right server gets picked per task. Single-server projects don't need to name anything.
+- **Test auth info** when criteria need login: a login URL and one or more named user profiles (email + password, or however your project authenticates).
+- Optionally: notes, throwaway-user pointers, scripts to reset state, anything else useful to a human reader.
+
+Use whatever Markdown shape reads well — bullet lists, nested headings, free prose. Be explicit about names. If there's any ambiguity (vd two servers on the same port, two profiles named `admin`), tester will flag it in the report rather than guess.
+
+### Example: single-server project
 
 ```markdown
-# lmd test environment
-
-Local-only config consumed by the `tester` agent and the `/lmd:explore`
-skill. See plugins/lmd/templates/test-env.md.example in the lmd repo
-for a working template.
+# Test environment
 
 ## Test Server
 
 Dev server: http://localhost:5173
-Start command: npm run dev
+Start command: npm run dev   # informational — tester never runs this
 
 ## Test Auth
 
 Login URL: http://localhost:5173/login
+
 Test users:
   - default: test@example.com / testpass
   - admin:   admin@example.com / adminpass
-
-# Throwaway destroyable user (for delete-account tests):
-#   - throwaway-pool: see scripts/seed-throwaway.ts
+  - throwaway-pool: see scripts/seed-throwaway.ts
 ```
 
-Gitignore policy is up to the user — both patterns are valid:
+### Example: multi-server monorepo
 
-- **Commit** the file when test creds are shared across the team (test users in a dev DB).
+```markdown
+# Test environment
+
+## Test Servers
+
+- lms:         http://localhost:5173 (npm run dev --workspace=lms)
+- crm:         http://localhost:5174 (npm run dev --workspace=crm)
+- lms-backend: http://localhost:3000
+
+## Test Auth
+
+- lms:
+    Login URL: http://localhost:5173/login
+    Users:
+      - default: test@lms.com / testpass
+      - admin:   admin@lms.com / adminpass
+- crm:
+    Login URL: http://localhost:5174/sign-in
+    Users:
+      - default: test@crm.com / testpass
+```
+
+### How tester maps a scope to a server
+
+For a task with scope `lms-auth`, tester picks the named server whose name is the closest prefix match — `lms` here. For multi-scope `lms + crm`, tester runs the relevant criteria against each matching server. If nothing matches, tester picks the single server when there is only one, otherwise marks the criterion as fail with reason `"no server in .lmd/test-env.md matches scope <x>"`.
+
+Auth profiles are referenced as `default` / `admin` (single-server) or `<server>.<profile>` (multi-server, vd `lms.admin`). `/lmd:explore --auth <name>` accepts both forms.
+
+### Operational notes
+
+- `Start command:` (or however you write it) is informational. Tester never runs it. You start the server in a separate terminal before claiming a runtime-heavy task.
+- Auth is per-server. A server without auth info only supports public-only criteria; auth-required criteria against that server fail with a clear message.
+- The file lives outside `.lmd/autopilot/` so autopilot's Step 6 cleanup never touches it.
+
+### Gitignore policy
+
+Up to you — both patterns are valid:
+
+- **Commit** the file when test creds are shared across the team (test users in a shared dev DB).
 - **Gitignore** the file when creds are per-developer or sensitive. Since `.lmd/` is typically gitignored anyway (autopilot artifacts), the default behavior already keeps `test-env.md` local. Add `!.lmd/test-env.md` to `.gitignore` if you want to commit it.
-
-The file lives outside `.lmd/autopilot/` so autopilot's Step 6 cleanup never touches it.
 
 ## Pre-flight — verify required input files exist
 
@@ -80,12 +121,14 @@ After the input-file check, probe what's available for runtime QA. This is **non
 
 Four independent probes; record `TEST_ENV_OK`, `PW_OK`, `DEV_URL`, `AUTH_OK` in memory. Pick whichever shell fits the host platform — Bash on POSIX (Linux / macOS / Git Bash / WSL), PowerShell on Windows native.
 
-**1. Test-env file presence** — does `<repo-root>/.lmd/test-env.md` exist? Use the `Read` tool (returns an error if missing). If present, parse:
+**1. Test-env file presence + parse** — does `<repo-root>/.lmd/test-env.md` exist? Use the `Read` tool (returns an error if missing). If present, **read the whole file and build in-memory maps**:
 
-- The first non-empty value on a line starting with `Dev server:` under the `## Test Server` heading — store as `TEST_SERVER_URL` (or empty if section absent / line missing).
-- The presence of the `## Test Auth` heading — store as `TEST_AUTH_SECTION_PRESENT` (boolean).
+- `SERVERS: Map<name, url>` — one entry per declared server. If the file only has one unnamed server, store it under the synthetic name `default`. If servers are named (vd `lms`, `crm`), use those names verbatim.
+- `AUTH: Map<server-name, { loginUrl, users: Map<profile, {email, password}> }>` — one entry per server that has auth info. Single-server files keep auth under `default`.
 
-Set `TEST_ENV_OK = yes` if the file exists at all; `no` otherwise. **If `TEST_ENV_OK == no`, runtime verification is disabled** — every runtime-classified criterion will fail at step 7 with the instruction to create `.lmd/test-env.md`. Skip probes 2–4; static checks still run.
+The file format is intentionally free-form (see "Test-env file" above), so use judgment when parsing — look for URLs, look for credential pairs, look for names. If something is ambiguous (two servers with no clear name, conflicting profile names), record it in the report's `## Runtime prerequisites` section and pick the most sensible interpretation rather than failing the whole probe.
+
+Set `TEST_ENV_OK = yes` if the file exists AND at least one server URL was extracted. **If `TEST_ENV_OK == no`, runtime verification is disabled** — every runtime-classified criterion will fail at step 7 with the instruction to create `.lmd/test-env.md`. Skip probes 2–4; static checks still run.
 
 **2. Playwright availability** — does `npx playwright --version` succeed without falling back to install prompts?
 
@@ -94,18 +137,23 @@ Set `TEST_ENV_OK = yes` if the file exists at all; `no` otherwise. **If `TEST_EN
 
 Set `PW_OK = yes | no` based on the result.
 
-**3. Dev server reachability** — only if `TEST_SERVER_URL` was found. Attempt an HTTP HEAD/GET with a ~3 s timeout; accept any 2xx/3xx/4xx response (a 401 still means a server is up). Do **not** probe default ports when the URL is missing — that was the legacy behavior; the clean-break design requires the URL to be declared explicitly.
+**3. Resolve target servers + reachability** — derive which servers this task needs, then probe each:
 
-- Bash: `curl -s -o /dev/null -m 3 -w "%{http_code}" "$U"` then check that the output matches `^[234][0-9][0-9]$`.
-- PowerShell: `try { (Invoke-WebRequest -Uri $U -Method Head -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }` then check that the integer is in `[200, 499]`.
+1. Pull the task's `Scope:` line; split on ` + ` to get the constituents.
+2. For each constituent, pick the matching `SERVERS` entry — closest prefix match by name (vd scope `lms-auth` → server `lms`). When only one server exists overall, use it for any scope. When no server name matches and there are multiple, record the ambiguity and skip — runtime criteria for that scope will fail with a clear reason.
+3. Collect the deduplicated set `TARGET_SERVERS`.
+4. Per server in `TARGET_SERVERS`, probe its URL:
+   - Bash: `curl -s -o /dev/null -m 3 -w "%{http_code}" "$U"` — accept any `[234][0-9][0-9]`.
+   - PowerShell: `try { (Invoke-WebRequest -Uri $U -Method Head -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }` — accept integer in `[200, 499]`.
+5. Record `REACHABLE: Map<server-name, boolean>`.
 
-Set `DEV_URL = TEST_SERVER_URL` if responsive; empty otherwise (with reason recorded for the report).
+Don't probe servers outside `TARGET_SERVERS` — irrelevant noise in the report.
 
-**4. Test auth presence** — `AUTH_OK = TEST_AUTH_SECTION_PRESENT`. No external check; credentials are validated only when actually used in a Playwright spec.
+**4. Auth coverage** — for each target server, `AUTH_OK[server] = AUTH.has(server)`. No external check; credentials are validated only when actually used in a Playwright spec.
 
-Record `runtime_ready = (TEST_ENV_OK == yes AND PW_OK == yes AND DEV_URL != "")`. Auth is optional (only needed for criteria that require login).
+Record `runtime_ready = (TEST_ENV_OK == yes AND PW_OK == yes AND every server in TARGET_SERVERS has REACHABLE[server] == true)`. Auth is per-server-and-criterion (only failing criteria are those that need login against a server that has no auth block).
 
-The tester does **NOT** boot the dev server itself — long-lived background processes are out of scope. If `DEV_URL` is empty, runtime criteria fail with reason `"dev server not reachable at <url>; start it and re-run, or fix the Dev server: line in .lmd/test-env.md"`.
+The tester does **NOT** boot dev servers itself — long-lived background processes are out of scope. If any target server is unreachable, the runtime criteria that target it fail with reason `"dev server <name> not reachable at <url>; start it and re-run, or fix .lmd/test-env.md"`.
 
 ## Workflow
 
