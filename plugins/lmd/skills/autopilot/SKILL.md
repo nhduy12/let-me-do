@@ -28,12 +28,15 @@ Every artifact lives in `.lmd/autopilot/<agent>/`. Sub-agents read each other's 
 
 ```
 /lmd:autopilot <task-id-or-prefix>
-   [--plan-cap N]      # default 3
-   [--dev-cap N]       # default 5
-   [--review-cap N]    # default 3
+   [--plan-cap N]      # default 2
+   [--dev-cap N]       # default 3
+   [--review-cap N]    # default 2
    [--no-cap]          # disable all three caps
    [--keep-artifacts]  # skip Step 6 cleanup on done
 ```
+
+Defaults are tuned to keep a worst-case run under ~150k tokens for typical
+project sizes. Raise via `--*-cap` if you knowingly need more iterations.
 
 ## Concepts
 
@@ -46,9 +49,9 @@ Every artifact lives in `.lmd/autopilot/<agent>/`. Sub-agents read each other's 
 
 | Loop | Default | On exhaust |
 |---|---|---|
-| plan ⇄ plan-review | 3 | `kind:'plan_unresolved'` |
-| dev ⇄ test          | 5 | `kind:'test_unresolved'` |
-| review ⇄ dev        | 3 | `kind:'review_unresolved'` |
+| plan ⇄ plan-review | 2 | `kind:'plan_unresolved'` |
+| dev ⇄ test          | 3 | `kind:'test_unresolved'` |
+| review ⇄ dev        | 2 | `kind:'review_unresolved'` |
 | committer           | 1 (fixed) | `kind:'commit_failed'` |
 | file-not-found recovery | 3 per missing file | `kind:'recovery_exhausted'` |
 

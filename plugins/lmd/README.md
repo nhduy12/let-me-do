@@ -344,6 +344,7 @@ Adding a new agent:
 - `pg_database` still lists every DB in the cluster (Postgres limitation). Harmless — `ai_agent` cannot read any of them.
 - Node ≥ 20 required because the bundled MCP server uses ES modules + top-level `await`.
 - Step-0 context-scan (root `CLAUDE.md` + `.claude/rules/`) runs per sub-agent spawn. For one task running through the full pipeline, that load is incurred 7× — keep root `CLAUDE.md` under ~5k tokens to keep per-task cost predictable. Only the `developer` agent additionally walks nested `CLAUDE.md` under the scope folder; every other agent reads root only.
+- **Per-task token budget.** Happy-path (1 plan / 1 dev / 1 review iter) is ~40–60k tokens for typical project sizes. Defaults (plan-cap 2, dev-cap 3, review-cap 2) keep worst-case under ~150k. Bump via `--plan-cap` / `--dev-cap` / `--review-cap` when you knowingly need more retries.
 - The full autopilot pipeline has not been exhaustively dogfooded on diverse repos — expect rough edges. Report blockers at the GitHub homepage.
 
 ## Tests
