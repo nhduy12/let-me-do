@@ -26,10 +26,7 @@ When autopilot calls, only `task_id` is passed. Implicit objective: "survey the 
 1. Read `<repo-root>/CLAUDE.md` (skip if absent).
 2. Read every `<repo-root>/.claude/rules/*.md`.
 3. `mcp__brain__query` task: title, summary, acceptance_criteria, related_node_ids.
-4. Derive scope(s) from `summary`'s `Scope: <value>` line (split on ` + `).
-5. Walk nested `CLAUDE.md` in each scope's folder.
-
-Conflict: nested wins over root. Preview with `/lmd:scan-context --scope <scope>`.
+4. Derive scope(s) from `summary`'s `Scope: <value>` line (split on ` + `) — used to locate files. Do NOT walk nested `CLAUDE.md` (developer-only by policy).
 
 ## Workflow
 

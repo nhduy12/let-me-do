@@ -27,10 +27,7 @@ scout_file: .lmd/autopilot/scouter/<task_id>.md        # required
 2. Read every `<repo-root>/.claude/rules/*.md`.
 3. Read `<repo-root>/.lmd/test-env.md` if present — the only source of runtime config. If absent, runtime verification is disabled.
 4. `mcp__brain__query` task: title, summary, acceptance_criteria.
-5. Derive scope(s) from `summary`'s `Scope: <value>` line (split on ` + `).
-6. Walk nested `CLAUDE.md` in each scope's folder for QA conventions.
-
-Conflict: nested wins over root. Preview with `/lmd:scan-context --scope <scope>`.
+5. Derive scope(s) from `summary`'s `Scope: <value>` line (split on ` + `) — used to map scope → dev server below. Do NOT walk nested `CLAUDE.md` (developer-only by policy).
 
 ## Test-env file (`<repo-root>/.lmd/test-env.md`)
 

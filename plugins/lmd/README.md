@@ -117,7 +117,7 @@ Task id format: `<YYYYMMDD>-<NNN>-[<scope>]-<slug>`
 - `<scope>` examples (single): `lms` (whole app), `lms-backend` (one layer), `lms-auth` (one module in a single-app repo), `docs`, `infra`.
 - `<scope>` for **multi-scope tasks** (real-world: one task touches several areas): join with ` + ` (spaces around the plus), e.g. `[lms + exam-frontend]`, `[lms-backend + crm-backend]`, `[lms-auth + backend-auth]`.
 - `<scope>` is canonical in the `summary` field's `Scope:` line — the brackets in the id are a visual aid for humans scanning lists.
-- For multi-scope tasks, agents read the nested `CLAUDE.md` files inside **every constituent's folder** at Step 0; conflicting rules are surfaced to the user.
+- For multi-scope tasks, the `developer` agent reads the nested `CLAUDE.md` files inside **every constituent's folder** at Step 0; conflicting rules are surfaced to the user. Every other lmd agent reads only the root `CLAUDE.md` regardless of scope count.
 
 For richer intent, explicit slash skills are always available:
 
@@ -130,7 +130,6 @@ For richer intent, explicit slash skills are always available:
 /lmd:autopilot <id>              — resume a claimed/active task (also kicked off by claim-task)
 /lmd:qa | /lmd:review | /lmd:commit   — ad-hoc tester / reviewer / committer wrappers (outside the autopilot pipeline)
 /lmd:explore <seed-url>          — Playwright UI walk
-/lmd:scan-context                — preview context files agents will load
 /lmd:check-system                — diagnose setup (git, brain DB, optional QA prereqs)
 /lmd:init-brain                  — one-time bootstrap
 ```
@@ -344,7 +343,7 @@ Adding a new agent:
 - Claude Code has no native "only subagent X may call MCP tool Y" mechanism. We rely on convention + the per-call user prompt for `execute`.
 - `pg_database` still lists every DB in the cluster (Postgres limitation). Harmless — `ai_agent` cannot read any of them.
 - Node ≥ 20 required because the bundled MCP server uses ES modules + top-level `await`.
-- Step-0 context-scan (`CLAUDE.md` + `.claude/rules/`) runs per sub-agent spawn. For one task running through the full pipeline, that load is incurred 7× — keep `CLAUDE.md` under ~5k tokens to keep per-task cost predictable. Preview with `/lmd:scan-context`.
+- Step-0 context-scan (root `CLAUDE.md` + `.claude/rules/`) runs per sub-agent spawn. For one task running through the full pipeline, that load is incurred 7× — keep root `CLAUDE.md` under ~5k tokens to keep per-task cost predictable. Only the `developer` agent additionally walks nested `CLAUDE.md` under the scope folder; every other agent reads root only.
 - The full autopilot pipeline has not been exhaustively dogfooded on diverse repos — expect rough edges. Report blockers at the GitHub homepage.
 
 ## Tests

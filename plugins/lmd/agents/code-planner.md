@@ -25,11 +25,8 @@ prior_plan_review_file: .lmd/autopilot/plan-reviewer/<task_id>-<N-1>.md  # optio
 1. Read `<repo-root>/CLAUDE.md` (skip if absent).
 2. Read every `<repo-root>/.claude/rules/*.md`.
 3. `mcp__brain__query` task: title, summary, acceptance_criteria, related_node_ids, type.
-4. Derive scope(s) from `summary`'s `Scope: <value>` line (split on ` + `).
-5. Walk nested `CLAUDE.md` in each scope's folder — architectural rules the plan must satisfy.
-6. Per scope, query brain for ~3–5 nodes to absorb naming + structure: `SELECT id, label, type, description FROM nodes WHERE app = $scope ORDER BY label LIMIT 5`.
-
-Conflict: nested wins over root. Preview with `/lmd:scan-context --scope <scope>`.
+4. Derive scope(s) from `summary`'s `Scope: <value>` line (split on ` + `) — used for brain queries below; do NOT walk nested `CLAUDE.md` (developer-only by policy — the plan says WHICH files to touch, the developer reads per-folder rules when it actually writes code).
+5. Per scope, query brain for ~3–5 nodes to absorb naming + structure: `SELECT id, label, type, description FROM nodes WHERE app = $scope ORDER BY label LIMIT 5`.
 
 ## Pre-flight — verify inputs
 

@@ -23,8 +23,7 @@ commit_type: feat | fix | refactor | chore | docs | test       # optional, only 
 1. Read `<repo-root>/CLAUDE.md` (commit conventions, trailer rules, hook policies).
 2. Read every `<repo-root>/.claude/rules/*.md`.
 3. `mcp__brain__query` task: title, summary, type.
-4. Derive scope(s) from `summary`'s `Scope: <value>` line (split on ` + `).
-5. Walk nested `CLAUDE.md` in each scope's folder — per-scope commit conventions (prefix, conventional-commit type, etc). Multi-scope tasks may carry multiple scope tags (e.g. `[lms + crm]`).
+4. Derive scope(s) from `summary`'s `Scope: <value>` line (split on ` + `) — used as `<scope>` in the conventional-commit prefix. Multi-scope tasks may carry multiple scope tags (e.g. `[lms + crm]`). Do NOT walk nested `CLAUDE.md` (developer-only by policy — commit conventions live in root CLAUDE.md).
 
 Pay attention to:
 - **Conventional-commit requirements** — auto-detect from `## Git Commit Rules` / `## Commit Convention` sections. Required only when documented; otherwise freeform.

@@ -27,10 +27,10 @@ prior_review_file: .lmd/autopilot/reviewer/<task_id>-<M>.md   # optional — rev
 2. Read every `<repo-root>/.claude/rules/*.md`.
 3. `mcp__brain__query` task: title, summary, acceptance_criteria, related_node_ids.
 4. Derive scope(s) from `summary`'s `Scope: <value>` line (split on ` + `).
-5. Walk nested `CLAUDE.md` in each scope's folder — tech stack, conventions, forbidden patterns.
+5. Walk nested `CLAUDE.md` in each scope's folder — tech stack, conventions, forbidden patterns. **Developer is the only agent that does this walk** — every other lmd agent reads root only. The developer is the one writing code, so per-folder rules matter here.
 6. Per scope, look for `<repo-root>/.claude/agents/<scope>-*-dev.md`. Matching specialist + complex change in that scope → prefer to delegate that portion. Multi-scope tasks may delegate different parts to different specialists.
 
-Conflict: nested wins over root. Preview with `/lmd:scan-context --scope <scope>`.
+Conflict: nested wins over root.
 
 ## Pre-flight — verify inputs
 

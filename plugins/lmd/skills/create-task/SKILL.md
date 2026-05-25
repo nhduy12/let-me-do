@@ -78,7 +78,7 @@ Procedure:
 4. Multi-scope: request mentions distinct areas → propose ` + `-joined.
 5. Confirm with user: `Inferred scope: <value> (matched <folder>). Confirm, edit, or type another.`
 
-**Forbidden values**: `multi` / `all` / `everything` / `*` are rejected — agents need explicit constituents to know which folders' nested `CLAUDE.md` to read. Ask for specifics and rebuild.
+**Forbidden values**: `multi` / `all` / `everything` / `*` are rejected — the developer agent needs explicit constituents to know which folders' nested `CLAUDE.md` to read (other agents only consume the scope as a label / brain filter). Ask for specifics and rebuild.
 
 ### Phase 3 — Done criteria
 

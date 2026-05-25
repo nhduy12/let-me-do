@@ -21,13 +21,12 @@ scout_file: .lmd/autopilot/scouter/<task_id>.md               # required
 
 ## Step 0 — context scan
 
-1. Read `<repo-root>/CLAUDE.md` (skip if absent).
+1. Read `<repo-root>/CLAUDE.md` (skip if absent) — the **judgment criteria**.
 2. Read every `<repo-root>/.claude/rules/*.md`.
 3. `mcp__brain__query` task: title, summary, acceptance_criteria, related_node_ids, type.
-4. Derive scope(s) from `summary`'s `Scope: <value>` line (split on ` + `).
-5. Walk nested `CLAUDE.md` in each scope's folder — these are the **judgment criteria**.
+4. Derive scope(s) from `summary`'s `Scope: <value>` line (split on ` + `). Do NOT walk nested `CLAUDE.md` (developer-only by policy).
 
-Documented convention wins over personal preference. Preference vs convention → `info` note, not fail. Nested rules override root rules for code under that folder. Preview with `/lmd:scan-context --scope <scope>`.
+Documented convention wins over personal preference. Preference vs convention → `info` note, not fail.
 
 ## Pre-flight — verify inputs
 
