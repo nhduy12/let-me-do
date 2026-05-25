@@ -53,6 +53,54 @@ let-me-do/
 | `flow-mapper` | planned | Reads the frontend source, auto-detects screen flows. |
 | `dead-screen-detector` | planned | Finds graph nodes with no matching code and proposes removal. |
 
+### Autopilot workflow
+
+How a claimed task flows from intake to commit. Solid arrows are verdicts that advance the pipeline; dashed arrows are retry loops (each bounded by its cap). Terminal states are pill-shaped.
+
+```mermaid
+flowchart TD
+    Start([/lmd:autopilot &lt;task-id&gt;]):::start --> Preflight{check-system<br/>blocking tier}
+    Preflight -->|FAIL| ExitEarly([exit · no claim]):::terminal
+    Preflight -->|PASS| Claim{claim_task}
+    Claim -->|owned by other| ExitClaim([exit · busy]):::terminal
+    Claim -->|owned by me| Scout
+
+    Scout[scouter<br/>read-only recon]:::agent --> Plan
+    Scout -.->|blocked| ScoutBlocked([blocked · scout_blocked]):::terminal
+
+    Plan[code-planner<br/>plan_iter N]:::agent --> PR{plan-reviewer}
+    PR -.->|fail · iter &lt; cap| Plan
+    PR -->|cap exhausted| BlockedPlan([blocked · plan_unresolved]):::terminal
+    Plan -.->|scout-insufficient| Scout
+    PR -->|pass| Dev
+
+    Dev[developer<br/>dev_iter N]:::agent -.->|plan-insufficient| Plan
+    Dev --> Tester{tester}
+    Tester -.->|fail · iter &lt; cap| Dev
+    Tester -->|cap exhausted| BlockedTest([blocked · test_unresolved]):::terminal
+    Tester -->|pass| Reviewer
+
+    Reviewer{reviewer} -.->|request-changes · iter &lt; cap| Dev
+    Reviewer -->|cap exhausted| BlockedRev([blocked · review_unresolved]):::terminal
+    Reviewer -->|approve| Committer
+
+    Committer[committer]:::agent -->|hook failure · cap=1| BlockedCommit([blocked · commit_failed]):::terminal
+    Committer -->|success| Complete[complete_task<br/>+ task_events: complete]:::system
+    Complete --> Cleanup[Step 6 · delete<br/>artifacts unless<br/>--keep-artifacts]:::system
+    Cleanup --> Done([done · commit_sha returned]):::terminal
+
+    classDef start fill:#1f6feb,stroke:#0b3a86,color:#fff
+    classDef agent fill:#fef3c7,stroke:#d97706,color:#1f2937
+    classDef system fill:#e0e7ff,stroke:#4338ca,color:#1f2937
+    classDef terminal fill:#d1fae5,stroke:#059669,color:#064e3b
+```
+
+Notes:
+- Default caps (v0.2.0): plan = 2, dev = 3, review = 2, committer = 1, file-not-found recovery = 3 per missing file. Override via `--plan-cap` / `--dev-cap` / `--review-cap` / `--no-cap`.
+- `dev_cap` is NOT reset when reviewer requests changes — it stays scoped to the whole task so a ping-pong review/dev loop cannot exhaust unbounded dev iters.
+- Stuck-loop bail: each sub-agent returns a 16-hex signature; autopilot keeps the last 3 per loop and bails `stuck_<loop>_loop` when all three match (orthogonal to the cap counter).
+- Every transition writes a row to `task_events`; resume on `/lmd:autopilot <id>` rehydrates all in-memory state from that table.
+
 ## Install
 
 The repo is both a **marketplace** and a **plugin** — `.claude-plugin/marketplace.json` declares one plugin (`lmd`) whose source is the same repo root.
