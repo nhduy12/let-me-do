@@ -609,3 +609,16 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+// Drain the pg pool on shutdown so we don't leave dangling Postgres
+// backends when Claude Code restarts the MCP server (eg /reload-plugins).
+async function shutdown() {
+  try {
+    await pool.end();
+  } catch {
+    // best-effort; we're exiting anyway
+  }
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
