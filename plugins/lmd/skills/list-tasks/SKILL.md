@@ -14,18 +14,22 @@ Morning standup helper. Combines tasks assigned to me with the open pool, filter
 When invoked with no args (or user just asks "what tasks are left?"):
 
 1. Resolve current user: `git config user.email`.
-2. Query brain:
-   ```sql
-   SELECT id, title, status, current_step, assigned_to, claimed_by, summary, updated_at
-   FROM tasks
-   WHERE status NOT IN ('done','cancelled')
-     AND (assigned_to = $me OR claimed_by = $me OR (assigned_to IS NULL AND status = 'pending'))
-   ORDER BY
-     CASE status WHEN 'active' THEN 0 WHEN 'claimed' THEN 1 ELSE 2 END,
-     updated_at DESC
-   LIMIT 20;
+2. Query brain — **pass the email via `params` ($1), never string-concatenate**:
    ```
-   Limit fixed at 20 — refine with `--search` or other filters for more.
+   mcp__brain__query({
+     sql: `SELECT id, title, status, current_step, assigned_to, claimed_by, summary, updated_at
+           FROM tasks
+           WHERE status NOT IN ('done','cancelled')
+             AND (assigned_to = $1 OR claimed_by = $1
+                  OR (assigned_to IS NULL AND status = 'pending'))
+           ORDER BY
+             CASE status WHEN 'active' THEN 0 WHEN 'claimed' THEN 1 ELSE 2 END,
+             updated_at DESC
+           LIMIT 20`,
+     params: [user_email]
+   })
+   ```
+   Limit fixed at 20 — refine with `--search` or other filters for more. Same pattern for `--search`, `--by`, etc.: keep all user-supplied values in `params`.
 3. Parse `Priority:` / `Deadline:` lines from each `summary` for sorting hints.
 4. Render a 1-indexed numbered list, plain text. Priority as `[high]` / `[medium]` / `[low]`, deadline as `due <YYYY-MM-DD>`.
 

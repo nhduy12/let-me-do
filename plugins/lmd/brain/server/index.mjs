@@ -51,13 +51,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "query",
       description:
-        "Run a read-only SELECT (or WITH ... SELECT) on the brain database. Returns rows as JSON. Max rows capped by MAX_ROWS env.",
+        "Run a read-only SELECT (or WITH ... SELECT) on the brain database. Returns rows as JSON. Max rows capped by MAX_ROWS env. Prefer passing user-supplied values via the `params` array (referenced as $1, $2, ... in the SQL) instead of string-concatenating them — Postgres handles escaping safely.",
       inputSchema: {
         type: "object",
         properties: {
           sql: {
             type: "string",
-            description: "A single SELECT (or read-only WITH) statement.",
+            description: "A single SELECT (or read-only WITH) statement. Use $1, $2 placeholders to reference entries in `params`.",
+          },
+          params: {
+            type: "array",
+            description: "Optional positional parameters for the SQL ($1, $2, ...). Strongly preferred for any value that came from outside the agent (git config, task fields, env). Omit for SQL with no placeholders.",
+            items: {},
           },
         },
         required: ["sql"],
@@ -66,14 +71,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "execute",
       description:
-        "Escape hatch for raw INSERT / UPDATE / DELETE on the brain database. DDL forbidden. Single statement per call. Prefer the typed tools (upsert_node, upsert_edge, create_task, claim_task, etc.) when they fit — they are parameterized and idempotent. Use this only for ad-hoc writes the typed tools don't cover.",
+        "Escape hatch for raw INSERT / UPDATE / DELETE on the brain database. DDL forbidden. Single statement per call. Prefer the typed tools (upsert_node, upsert_edge, create_task, claim_task, etc.) when they fit — they are parameterized and idempotent. Use this only for ad-hoc writes the typed tools don't cover. Pass user-supplied values via `params` ($1, $2, ...) instead of string-concatenating them.",
       inputSchema: {
         type: "object",
         properties: {
           sql: {
             type: "string",
             description:
-              "A single INSERT, UPDATE, DELETE, or writable WITH statement.",
+              "A single INSERT, UPDATE, DELETE, or writable WITH statement. Use $1, $2 placeholders to reference entries in `params`.",
+          },
+          params: {
+            type: "array",
+            description: "Optional positional parameters for the SQL ($1, $2, ...).",
+            items: {},
           },
         },
         required: ["sql"],
@@ -272,6 +282,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
   if (name === "query") {
     const raw = String(args?.sql ?? "");
+    const params = Array.isArray(args?.params) ? args.params : undefined;
     const sql = ensureSingleStatement(raw);
     const scrubbed = stripStringsAndComments(sql);
     if (!SELECT_START_RE.test(scrubbed)) {
@@ -283,7 +294,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (WRITE_KEYWORD_RE.test(scrubbed)) {
       throw new Error("Use the `execute` tool for write statements");
     }
-    const r = await pool.query({ text: sql, rowMode: "object" });
+    const r = params
+      ? await pool.query(sql, params)
+      : await pool.query({ text: sql, rowMode: "object" });
     const rows = r.rows.slice(0, MAX_ROWS);
     return asText({
       rowCount: r.rowCount,
@@ -294,6 +307,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
   if (name === "execute") {
     const raw = String(args?.sql ?? "");
+    const params = Array.isArray(args?.params) ? args.params : undefined;
     const sql = ensureSingleStatement(raw);
     const scrubbed = stripStringsAndComments(sql);
     if (!WRITE_START_RE.test(scrubbed)) {
@@ -302,7 +316,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (FORBIDDEN_RE.test(scrubbed)) {
       throw new Error("Forbidden DDL or privilege statement");
     }
-    const r = await pool.query(sql);
+    const r = params ? await pool.query(sql, params) : await pool.query(sql);
     return asText({ rowCount: r.rowCount ?? 0, command: r.command });
   }
 
@@ -556,7 +570,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         bumpIter,                      // $8
       ],
     );
-    return asText({ updated: r.rows[0] ?? null });
+    if (r.rowCount === 0) {
+      throw new Error(`update_task_step: task ${a.id} not found`);
+    }
+    return asText({ updated: r.rows[0] });
   }
 
   if (name === "complete_task") {
@@ -579,7 +596,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
        SELECT * FROM upd`,
       [a.id, a.commit_sha ?? null],
     );
-    return asText({ completed: r.rows[0] ?? null });
+    if (r.rowCount === 0) {
+      throw new Error(`complete_task: task ${a.id} not found`);
+    }
+    return asText({ completed: r.rows[0] });
   }
 
   if (name === "cancel_task") {

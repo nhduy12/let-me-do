@@ -248,8 +248,8 @@ SELECT count(*) FROM nodes;             -- OK
 
 | Tool | Purpose | Guards |
 |---|---|---|
-| `mcp__brain__query` | Read-only `SELECT` / `WITH … SELECT` | Must start with `SELECT`/`WITH`; rejects DDL and write keywords; single statement; row cap |
-| `mcp__brain__execute` | Raw `INSERT` / `UPDATE` / `DELETE` / writable `WITH` (escape hatch) | Must start with one of those; rejects DDL; single statement. Prefer the typed tools below. |
+| `mcp__brain__query` | Read-only `SELECT` / `WITH … SELECT` | Must start with `SELECT`/`WITH`; rejects DDL and write keywords; single statement; row cap. Optional `params` array (`$1`, `$2`, …) — strongly preferred for any externally-supplied value |
+| `mcp__brain__execute` | Raw `INSERT` / `UPDATE` / `DELETE` / writable `WITH` (escape hatch) | Must start with one of those; rejects DDL; single statement. Optional `params` array. Prefer the typed tools below. |
 | `mcp__brain__upsert_node` | Idempotent node upsert | Parameterized; required: id, app, label |
 | `mcp__brain__upsert_edge` | Idempotent edge upsert | Parameterized; required: id, source, target, action, steps |
 | `mcp__brain__delete_node` / `delete_edge` | Remove graph records | `delete_node` cascades to dependent edges by default |
@@ -323,7 +323,7 @@ Every task mutation that's worth replaying lands here. Autopilot resume reads fr
 
 | Layer | Mechanism | What it protects against |
 |---|---|---|
-| MCP server | Regex statement-type whitelist, single-statement, row cap, query timeout | DDL injection, runaway queries, multi-statement attacks |
+| MCP server | Regex statement-type whitelist (statement-position only), single-statement, row cap, query timeout, optional `params` array for `query`/`execute` | DDL injection, runaway queries, multi-statement attacks, SQL injection via interpolated values |
 | DB role `ai_agent` | GRANT-only on one DB; zero privileges on every other DB in the cluster | Lateral movement |
 | Typed tool design | Every write tool is parameterized, idempotent, and race-safe at the server level. Raw `execute` is opt-in only. | Bad SQL composed by an agent; race conditions on `claim_task`; non-idempotent upserts |
 
