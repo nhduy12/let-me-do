@@ -32,7 +32,8 @@ let-me-do/
 │   │   ├── package.json
 │   │   └── index.mjs
 │   └── sql/
-│       └── setup.sql            ← parameterized schema (one DB per project)
+│       ├── setup.sql            ← parameterized schema (one DB per project, psql path)
+│       └── (setup-db.mjs lives in server/ — runs the schema via node + pg)
 └── .mcp.json                     ← MCP server config (`brain`)
 ```
 
@@ -268,6 +269,36 @@ Recommendation: add `.lmd/` to `.gitignore` so per-task artifacts never accident
 
 You need a Postgres cluster and a superuser. Use a dedicated DB per project so they stay isolated (`brain_my_project`, `brain_team_b`, ...).
 
+### Recommended: one-command Node runner
+
+```bash
+cd <plugin-root>/brain/server
+node setup-db.mjs
+# interactive — asks for: superuser URI, new DB name, ai_agent password
+```
+
+Non-interactive:
+
+```bash
+node setup-db.mjs --auto \
+  --admin-uri "postgresql://postgres:<adminpwd>@localhost:5432/postgres" \
+  --db-name brain_my_project \
+  --ai-password '<StrongPwd>'
+```
+
+The runner:
+
+- Auto-installs its npm deps on first run (shares `node_modules` with the MCP server).
+- Connects with your superuser URI and runs `CREATE DATABASE` / `CREATE ROLE` (idempotent — re-runs are safe).
+- Reconnects to the new DB and applies the schema: tables `nodes`, `edges`, `tasks`, `task_events` with GIN + B-tree indexes, function `find_paths(src, tgt, max_depth)`, and GRANTs scoped to that one DB.
+- Prints the connection string to paste into Claude Code's `database_uri` user_config.
+
+Useful flags: `--print-uri-only` (emit just the final URI on stdout — pipe-friendly), `-h` for full help.
+
+### Alternative: legacy psql script
+
+For environments where you'd rather use a GUI or a direct `psql` invocation:
+
 ```bash
 psql -U <superuser> -h <host> \
   -v db_name=brain_my_project \
@@ -275,15 +306,9 @@ psql -U <superuser> -h <host> \
   -f brain/sql/setup.sql
 ```
 
-The script creates:
+Produces the same DB / role / schema. Doesn't work through PgBouncer (uses `\c` to switch DBs).
 
-- Database `brain_my_project` (idempotent)
-- Role `ai_agent` (login, not superuser, owns no DBs beyond its own tables)
-- Tables `nodes`, `edges`, `tasks`, `task_events` with GIN + B-tree indexes
-- Function `find_paths(src, tgt, max_depth)` for path traversal
-- Full GRANTs for `ai_agent` **only in this DB**
-
-Verify isolation:
+### Verify isolation
 
 ```sql
 \c <some_other_team_db> ai_agent

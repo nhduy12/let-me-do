@@ -60,7 +60,7 @@ After fixing, restart the session (or `/reload-plugins`) and re-run check-system
 SELECT count(*) AS n FROM information_schema.tables
 WHERE table_schema='public' AND table_name IN ('tasks','task_events','nodes','edges');
 ```
-Pass when `n == 4`. Fix: schema not initialized. Run `psql ... -f <plugin-root>/brain/sql/setup.sql` (see plugin README).
+Pass when `n == 4`. Fix: schema not initialized. Run `node <plugin-root>/brain/server/setup-db.mjs` (recommended, one-command Node runner) or `psql ... -f <plugin-root>/brain/sql/setup.sql` (legacy). See plugin README "Set up the brain database".
 
 ### Tier 2 — Recommended
 

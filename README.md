@@ -18,6 +18,13 @@ After install Claude Code prompts for three config values:
 - `statement_timeout_ms` (default `5000`)
 - `max_rows` (default `500`)
 
+If you don't have the brain DB yet, run the one-command migration before pasting the `database_uri`:
+
+```bash
+cd <plugin-root>/brain/server
+node setup-db.mjs        # interactive; outputs the URI to paste
+```
+
 The brain MCP server auto-installs its npm dependencies on first run (`brain/server/start.mjs`). Node ≥ 20 and `npm` on PATH required.
 
 ## Layout
