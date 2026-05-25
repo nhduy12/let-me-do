@@ -18,6 +18,8 @@ After install Claude Code prompts for three config values:
 - `statement_timeout_ms` (default `5000`)
 - `max_rows` (default `500`)
 
+The brain MCP server auto-installs its npm dependencies on first run (`brain/server/start.mjs`). Node ≥ 20 and `npm` on PATH required.
+
 ## Layout
 
 ```

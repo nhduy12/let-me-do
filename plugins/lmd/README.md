@@ -36,20 +36,22 @@ let-me-do/
 └── .mcp.json                     ← MCP server config (`brain`)
 ```
 
+> **Status — v0.2.0 alpha.** All seven workflow agents and the autopilot orchestrator are implemented and unit-tested where deterministic (SQL guards have a `node --test` suite). End-to-end pipeline runs on real tasks are limited — expect rough edges, especially around the runtime tester branch and the file-not-found recovery paths. File issues at the homepage URL.
+
 ### Agent roadmap
 
 | Agent | Status | Purpose |
 |---|---|---|
-| `autopilot` (skill) | DRAFT | Orchestrates scout → plan ⇄ plan-review → dev ⇄ test → review ⇄ dev → commit pipeline for a task. |
-| `scouter` | DRAFT | Read-only codebase recon. Step 0 of every autopilot pipeline; writes scout report file. |
-| `code-planner` | DRAFT | Produces an implementation plan from scout + task. Never edits code. |
-| `plan-reviewer` | DRAFT | Reviews the plan before any code is written. Pass → dev; fail → re-plan. |
-| `developer` | DRAFT | Executes an approved plan. Upserts node/edge updates via typed brain tools. |
-| `tester` | DRAFT | Verifies a diff against task acceptance criteria + flushes newly-found edges. |
-| `reviewer` | DRAFT | Reviews code style, conventions, security, brain consistency. |
-| `committer` | DRAFT | Composes commit message from task + final dev report, stages, commits (no push). |
-| `flow-mapper` | TODO | Reads the frontend source, auto-detects screen flows. |
-| `dead-screen-detector` | TODO | Finds graph nodes with no matching code and proposes removal. |
+| `autopilot` (skill) | alpha | Orchestrates scout → plan ⇄ plan-review → dev ⇄ test → review ⇄ dev → commit pipeline for a task. |
+| `scouter` | alpha | Read-only codebase recon. Step 0 of every autopilot pipeline; writes scout report file. |
+| `code-planner` | alpha | Produces an implementation plan from scout + task. Never edits code. |
+| `plan-reviewer` | alpha | Reviews the plan before any code is written. Pass → dev; fail → re-plan. |
+| `developer` | alpha | Executes an approved plan. Upserts node/edge updates via typed brain tools. |
+| `tester` | alpha | Verifies a diff against task acceptance criteria + flushes newly-found edges. |
+| `reviewer` | alpha | Reviews code style, conventions, security, brain consistency. |
+| `committer` | alpha | Composes commit message from task + final dev report, stages, commits (no push). |
+| `flow-mapper` | planned | Reads the frontend source, auto-detects screen flows. |
+| `dead-screen-detector` | planned | Finds graph nodes with no matching code and proposes removal. |
 
 ## Install
 
@@ -70,6 +72,8 @@ After install Claude Code prompts for the three user-config values from `plugin.
 - `database_uri` (sensitive) — Postgres connection string for the brain DB. Format: `postgresql://ai_agent:<pwd>@<host>:5432/<db_name>`
 - `statement_timeout_ms` (default `5000`)
 - `max_rows` (default `500`)
+
+The brain MCP server bootstraps its npm dependencies on first start via `brain/server/start.mjs` (one-time, ~30s — node ≥ 20 + `npm` on PATH required). If your environment has no network or `npm` is missing, run `npm install --omit=dev` inside `<plugin-root>/brain/server/` manually before claiming a task.
 
 Bootstrap the brain DB (one time per project) per the section below before claiming any task.
 
@@ -339,4 +343,16 @@ Adding a new agent:
 
 - Claude Code has no native "only subagent X may call MCP tool Y" mechanism. We rely on convention + the per-call user prompt for `execute`.
 - `pg_database` still lists every DB in the cluster (Postgres limitation). Harmless — `ai_agent` cannot read any of them.
-- Node ≥ 20 required because the bundled MCP server uses ES modules.
+- Node ≥ 20 required because the bundled MCP server uses ES modules + top-level `await`.
+- Step-0 context-scan (`CLAUDE.md` + `.claude/rules/`) runs per sub-agent spawn. For one task running through the full pipeline, that load is incurred 7× — keep `CLAUDE.md` under ~5k tokens to keep per-task cost predictable. Preview with `/lmd:scan-context`.
+- The full autopilot pipeline has not been exhaustively dogfooded on diverse repos — expect rough edges. Report blockers at the GitHub homepage.
+
+## Tests
+
+Brain SQL guards have a deterministic test suite. Run from `brain/server/`:
+
+```bash
+node --test sql-guards.test.mjs
+```
+
+The rest of the workflow is LLM-driven and not unit-tested. Use `/lmd:check-system` to verify your local install before claiming a task.

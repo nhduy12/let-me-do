@@ -47,10 +47,12 @@ Fix: cd into a git repo, or `git init` here.
 Fix: `git config user.email "you@example.com"` — used as `created_by` / `claimed_by`.
 
 **3. Brain MCP reachable** — `mcp__brain__get_settings` returns a payload.
-Fix: brain MCP failed to start. Causes:
+Fix: brain MCP failed to start. Causes (in likelihood order):
+- **Brain server deps not installed yet** — the launcher (`brain/server/start.mjs`) auto-runs `npm install` on first start. If that failed (no network / `npm` not on PATH), check Claude Code logs and run `npm install --omit=dev` inside `<plugin-root>/brain/server/` manually, then `/reload-plugins`.
 - Plugin not installed → `claude plugin install lmd@let-me-do --scope project`.
 - `database_uri` user_config missing / wrong format. Expected `postgresql://ai_agent:<pwd>@<host>:5432/<db>`. Reinstall or edit `.claude/settings.local.json`.
-- Postgres unreachable — verify the DB is running.
+- Postgres unreachable — verify the DB is running and `ai_agent` can connect.
+- Node.js < 20 — server requires ES modules + top-level await.
 After fixing, restart the session (or `/reload-plugins`) and re-run check-system.
 
 **4. Brain schema** — `mcp__brain__query`:

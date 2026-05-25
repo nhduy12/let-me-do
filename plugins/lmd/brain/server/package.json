@@ -1,12 +1,13 @@
 {
   "name": "@let-me-do/brain-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Brain MCP server for the let-me-do plugin. Postgres-backed graph store shared by all let-me-do agents.",
   "type": "module",
   "main": "index.mjs",
   "scripts": {
-    "start": "node index.mjs"
+    "start": "node start.mjs",
+    "test": "node --test sql-guards.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

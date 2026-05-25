@@ -6,6 +6,14 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import pg from "pg";
+import {
+  FORBIDDEN_RE,
+  SELECT_START_RE,
+  WRITE_START_RE,
+  WRITE_KEYWORD_RE,
+  stripStringsAndComments,
+  ensureSingleStatement,
+} from "./sql-guards.mjs";
 
 const DATABASE_URI = process.env.DATABASE_URI;
 if (!DATABASE_URI) {
@@ -22,41 +30,6 @@ const pool = new pg.Pool({
   max: 4,
 });
 
-const FORBIDDEN_RE =
-  /\b(DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE|VACUUM|REINDEX|CLUSTER|COPY|SECURITY|SET\s+ROLE|RESET\s+ROLE|LISTEN|NOTIFY|LOAD|DO|CALL)\b/i;
-const SELECT_START_RE = /^\s*(SELECT|WITH)\b/i;
-const WRITE_START_RE = /^\s*(INSERT|UPDATE|DELETE|WITH)\b/i;
-const WRITE_KEYWORD_RE = /\b(INSERT|UPDATE|DELETE)\b/i;
-
-// Strip string literals, dollar-quoted strings, quoted identifiers, and
-// SQL comments before running keyword regex checks. Without this, a benign
-// query like `SELECT label FROM nodes WHERE label = 'Create account'` would
-// trip FORBIDDEN_RE on the literal "CREATE" inside a string.
-function stripStringsAndComments(sql) {
-  let out = sql;
-  // Line comments: -- to end of line
-  out = out.replace(/--[^\n]*/g, "");
-  // Block comments: /* ... */ (non-greedy, handles multiline)
-  out = out.replace(/\/\*[\s\S]*?\*\//g, "");
-  // Dollar-quoted strings: $tag$ ... $tag$  (Postgres-specific)
-  out = out.replace(/\$([A-Za-z_][A-Za-z0-9_]*)?\$[\s\S]*?\$\1\$/g, "''");
-  // Single-quoted strings (handles '' escape)
-  out = out.replace(/'(?:[^']|'')*'/g, "''");
-  // Double-quoted identifiers (handles "" escape) — keep as opaque empty pair
-  out = out.replace(/"(?:[^"]|"")*"/g, '""');
-  return out;
-}
-
-function ensureSingleStatement(sql) {
-  const trimmed = sql.replace(/;\s*$/, "").trim();
-  // Check for embedded semicolons on the stripped version so that semicolons
-  // inside string literals do not falsely flag as multi-statement.
-  if (stripStringsAndComments(trimmed).includes(";")) {
-    throw new Error("Only a single SQL statement per call is allowed");
-  }
-  return trimmed;
-}
-
 function asText(payload) {
   return {
     content: [
@@ -69,7 +42,7 @@ function asText(payload) {
 }
 
 const server = new Server(
-  { name: "let-me-do-brain", version: "0.1.0" },
+  { name: "let-me-do-brain", version: "0.2.0" },
   { capabilities: { tools: {} } },
 );
 

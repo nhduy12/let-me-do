@@ -1,7 +1,7 @@
 {
   "name": "lmd",
   "displayName": "Let Me Do",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Autopilot pipeline (scouter → code-planner ⇄ plan-reviewer → developer ⇄ tester → reviewer ⇄ developer → committer) that drives a single task from intake to commit. All agent-to-agent context flows through files under `.lmd/autopilot/`; the main agent holds only short status payloads. Backed by 'brain', a Postgres graph + task store shared across sessions.",
   "author": {
     "name": "Duy Nguyen",
