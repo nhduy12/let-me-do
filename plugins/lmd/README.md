@@ -267,9 +267,11 @@ Recommendation: add `.lmd/` to `.gitignore` so per-task artifacts never accident
 
 ## Set up the brain database (one-time per project)
 
-You need a Postgres cluster and a superuser. Use a dedicated DB per project so they stay isolated (`brain_my_project`, `brain_team_b`, ...).
+Pick the path that matches your starting state.
 
-### Recommended: one-command Node runner
+### Path A — bootstrap a fresh DB + role (recommended)
+
+Use this when you have a Postgres cluster + a superuser and want a clean, isolated DB just for brain (`brain_my_project`, `brain_team_b`, ...).
 
 ```bash
 cd <plugin-root>/brain/server
@@ -286,18 +288,31 @@ node setup-db.mjs --auto \
   --ai-password '<StrongPwd>'
 ```
 
-The runner:
+The runner creates the DB, the `ai_agent` login role, all four tables (`nodes`, `edges`, `tasks`, `task_events`), the `find_paths` function, indexes, and DB-scoped GRANTs. Then it prints the connection string for `database_uri`.
 
-- Auto-installs its npm deps on first run (shares `node_modules` with the MCP server).
-- Connects with your superuser URI and runs `CREATE DATABASE` / `CREATE ROLE` (idempotent — re-runs are safe).
-- Reconnects to the new DB and applies the schema: tables `nodes`, `edges`, `tasks`, `task_events` with GIN + B-tree indexes, function `find_paths(src, tgt, max_depth)`, and GRANTs scoped to that one DB.
-- Prints the connection string to paste into Claude Code's `database_uri` user_config.
+### Path B — schema-only: install tables into an existing DB
 
-Useful flags: `--print-uri-only` (emit just the final URI on stdout — pipe-friendly), `-h` for full help.
+Use this when you already have a Postgres DB + a user with table-creation rights inside it. The runner only adds the four brain tables + indexes + function; it does not touch DB creation, role creation, or roles outside the one you specify.
 
-### Alternative: legacy psql script
+```bash
+cd <plugin-root>/brain/server
+node setup-db.mjs --schema-only
+# interactive — asks for: target URI, role (defaults to the connecting user)
+```
 
-For environments where you'd rather use a GUI or a direct `psql` invocation:
+Non-interactive:
+
+```bash
+node setup-db.mjs --schema-only --auto \
+  --target-uri "postgresql://my_user:<pwd>@localhost:5432/my_existing_db" \
+  --role my_user
+```
+
+`--role` defaults to whatever `SELECT current_user` returns after connecting — set it explicitly only if you want a different role to own the tables (the connecting user must be a member of that role).
+
+### Path C — legacy psql script
+
+For environments where you'd rather use a GUI / direct `psql`:
 
 ```bash
 psql -U <superuser> -h <host> \
@@ -306,9 +321,15 @@ psql -U <superuser> -h <host> \
   -f brain/sql/setup.sql
 ```
 
-Produces the same DB / role / schema. Doesn't work through PgBouncer (uses `\c` to switch DBs).
+Equivalent to Path A. Doesn't work through PgBouncer (uses `\c` to switch DBs).
 
-### Verify isolation
+### Common to all paths
+
+- All paths are idempotent — re-running is safe.
+- `--print-uri-only` makes Paths A and B pipe-friendly (emit just the final URI on stdout, logs on stderr).
+- `node setup-db.mjs -h` shows all flags.
+
+### Verify isolation (Path A)
 
 ```sql
 \c <some_other_team_db> ai_agent

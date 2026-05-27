@@ -44,10 +44,14 @@ const { Client } = pg;
 
 const HELP = `Usage: node setup-db.mjs [options]
 
-Sets up the brain database (database + role + schema) in one shot.
+Two modes — pick the one that matches your starting state.
 
-Options:
-  --admin-uri <uri>       Postgres connection string with a superuser
+================================================================
+Mode 1 (default) — bootstrap a fresh DB + role from a superuser
+================================================================
+Creates database, creates ai_agent role, applies schema.
+
+  --admin-uri <uri>       Superuser connection string
                           (e.g. postgresql://postgres:pwd@localhost:5432/postgres).
                           Env: ADMIN_URI
   --db-name <name>        New database name. Default in interactive mode:
@@ -55,14 +59,37 @@ Options:
                           Env: DB_NAME
   --ai-password <pwd>     Password for the ai_agent role. Random if omitted in
                           --auto mode. Env: AI_PASSWORD
-  --auto                  Non-interactive. Fails if --admin-uri is missing;
-                          fills random password / default db_name when needed.
-  --print-uri-only        On success, print ONLY the final connection string
+
+================================================================
+Mode 2 — schema-only: add brain tables to an existing DB
+================================================================
+For when you already have a Postgres DB + a user with rights to create
+tables in it. Skips CREATE DATABASE and CREATE ROLE.
+
+  --schema-only           Switch to this mode.
+  --target-uri <uri>      Connection string to your existing DB
+                          (e.g. postgresql://my_user:pwd@host/my_db).
+                          Env: TARGET_URI
+  --role <name>           Role that should own the tables + receive grants.
+                          Default: the user the connection authenticates as
+                          (SELECT current_user). Must match
+                          [A-Za-z_][A-Za-z0-9_]*. Env: ROLE
+
+================================================================
+Common
+================================================================
+  --auto                  Non-interactive. Requires --admin-uri (mode 1) or
+                          --target-uri (mode 2). Fills sensible defaults for
+                          the rest.
+  --print-uri-only        On success, emit ONLY the final connection string
                           on stdout (progress goes to stderr).
   -h, --help              This help text.
 
-Idempotent: re-running with the same db_name skips the existing DB/role/tables.
-Password is always re-applied (ALTER ROLE).
+Idempotent in both modes:
+  - Tables use CREATE TABLE IF NOT EXISTS.
+  - Function uses CREATE OR REPLACE FUNCTION.
+  - Bootstrap mode: CREATE DATABASE / CREATE ROLE checked for existence; the
+    password is always re-applied via ALTER ROLE.
 `;
 
 function parseArgs(argv) {
@@ -72,6 +99,9 @@ function parseArgs(argv) {
     if (a === "--admin-uri") out.adminUri = argv[++i];
     else if (a === "--db-name") out.dbName = argv[++i];
     else if (a === "--ai-password") out.aiPwd = argv[++i];
+    else if (a === "--schema-only") out.schemaOnly = true;
+    else if (a === "--target-uri") out.targetUri = argv[++i];
+    else if (a === "--role") out.role = argv[++i];
     else if (a === "--auto") out.auto = true;
     else if (a === "--print-uri-only") out.printUriOnly = true;
     else if (a === "--help" || a === "-h") out.help = true;
@@ -118,6 +148,18 @@ function validateDbName(name) {
   }
 }
 
+function validateRoleName(name) {
+  // Postgres identifiers can be quoted with " and contain almost anything,
+  // but we are about to interpolate this directly into DDL like
+  // `ALTER TABLE x OWNER TO <ident>` (quoted by us). We still want a safe,
+  // recognizable shape — letters, digits, underscores. 63-char Postgres limit.
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(name)) {
+    throw new Error(
+      `Invalid role name "${name}": must start with a letter or underscore, contain only [A-Za-z0-9_], and be ≤ 63 chars.`,
+    );
+  }
+}
+
 function defaultDbName() {
   const folder = process.cwd().split(/[\\/]/).pop() ?? "project";
   return `brain_${folder.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "") || "project"}`;
@@ -133,17 +175,18 @@ function generatePassword() {
 // Schema (inlined — kept in sync with brain/sql/setup.sql by hand)
 // ============================================================================
 
-function buildSchemaSql(dbName) {
+function buildSchemaSql(dbName, roleName = "ai_agent") {
   const dbIdent = quoteIdent(dbName);
+  const role = quoteIdent(roleName);
   return `
-GRANT CONNECT ON DATABASE ${dbIdent} TO ai_agent;
-GRANT USAGE, CREATE ON SCHEMA public TO ai_agent;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ai_agent;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ai_agent;
+GRANT CONNECT ON DATABASE ${dbIdent} TO ${role};
+GRANT USAGE, CREATE ON SCHEMA public TO ${role};
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role};
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${role};
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ai_agent;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${role};
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO ai_agent;
+  GRANT USAGE, SELECT ON SEQUENCES TO ${role};
 
 BEGIN;
 
@@ -183,8 +226,8 @@ CREATE INDEX IF NOT EXISTS nodes_grp ON nodes (grp);
 CREATE INDEX IF NOT EXISTS edges_src ON edges (source);
 CREATE INDEX IF NOT EXISTS edges_tgt ON edges (target);
 
-ALTER TABLE nodes OWNER TO ai_agent;
-ALTER TABLE edges OWNER TO ai_agent;
+ALTER TABLE nodes OWNER TO ${role};
+ALTER TABLE edges OWNER TO ${role};
 
 COMMIT;
 
@@ -222,8 +265,8 @@ LANGUAGE sql STABLE AS $func$
   LIMIT 20;
 $func$;
 
-ALTER FUNCTION find_paths(TEXT, TEXT, INT) OWNER TO ai_agent;
-GRANT EXECUTE ON FUNCTION find_paths(TEXT, TEXT, INT) TO ai_agent;
+ALTER FUNCTION find_paths(TEXT, TEXT, INT) OWNER TO ${role};
+GRANT EXECUTE ON FUNCTION find_paths(TEXT, TEXT, INT) TO ${role};
 
 BEGIN;
 
@@ -261,7 +304,7 @@ CREATE INDEX IF NOT EXISTS tasks_fts ON tasks USING GIN (
   to_tsvector('simple', title || ' ' || COALESCE(summary, ''))
 );
 
-ALTER TABLE tasks OWNER TO ai_agent;
+ALTER TABLE tasks OWNER TO ${role};
 
 COMMIT;
 
@@ -294,8 +337,8 @@ CREATE INDEX IF NOT EXISTS task_events_step_signature_idx
   ON task_events (task_id, step, created_at DESC)
   WHERE kind = 'step' AND signature IS NOT NULL;
 
-ALTER TABLE task_events OWNER TO ai_agent;
-GRANT USAGE, SELECT ON SEQUENCE task_events_id_seq TO ai_agent;
+ALTER TABLE task_events OWNER TO ${role};
+GRANT USAGE, SELECT ON SEQUENCE task_events_id_seq TO ${role};
 
 COMMIT;
 `;
@@ -333,9 +376,9 @@ async function ensureRole(adminClient, password, opts) {
   }
 }
 
-async function applySchema(client, dbName, opts) {
-  await client.query(buildSchemaSql(dbName));
-  log("applied schema (tables, indexes, function, grants)", opts);
+async function applySchema(client, dbName, roleName, opts) {
+  await client.query(buildSchemaSql(dbName, roleName));
+  log(`applied schema (tables, indexes, function, grants → role ${roleName})`, opts);
 }
 
 function buildAgentUri(adminUri, dbName, aiPwd) {
@@ -353,6 +396,83 @@ function buildAgentUri(adminUri, dbName, aiPwd) {
 // Main
 // ============================================================================
 
+async function runSchemaOnly(args, opts) {
+  let targetUri = args.targetUri ?? process.env.TARGET_URI;
+  let roleName = args.role ?? process.env.ROLE;
+
+  if (!args.auto) {
+    const rl = readline.createInterface({ input: stdin, output: stderr });
+    if (!targetUri) {
+      targetUri = (
+        await rl.question(
+          "Target Postgres URI (postgresql://<user>:<pwd>@<host>:<port>/<db>): ",
+        )
+      ).trim();
+    }
+    if (!roleName) {
+      const ans = (
+        await rl.question(
+          "Role to own tables / receive grants [press enter to use the connecting user]: ",
+        )
+      ).trim();
+      if (ans) roleName = ans;
+    }
+    rl.close();
+  } else {
+    if (!targetUri) {
+      stderr.write("--auto --schema-only: --target-uri / TARGET_URI is required.\n");
+      process.exit(2);
+    }
+  }
+
+  if (!targetUri.startsWith("postgres://") && !targetUri.startsWith("postgresql://")) {
+    stderr.write(`Invalid --target-uri: must start with postgres:// or postgresql://\n`);
+    process.exit(2);
+  }
+
+  // Derive DB name from the URI path for the GRANT CONNECT statement.
+  const dbName = (() => {
+    const p = new URL(targetUri).pathname.replace(/^\//, "");
+    if (!p) throw new Error("--target-uri must include the database name in the path");
+    return p;
+  })();
+  validateDbName(dbName);
+
+  const target = new Client({ connectionString: targetUri });
+  try {
+    await target.connect();
+  } catch (e) {
+    stderr.write(`Cannot connect to target URI: ${e.message}\n`);
+    process.exit(1);
+  }
+
+  try {
+    if (!roleName) {
+      const r = await target.query("SELECT current_user AS u");
+      roleName = r.rows[0].u;
+      log(`role not specified; using connecting user "${roleName}"`, opts);
+    }
+    validateRoleName(roleName);
+
+    log(`schema-only mode: target db=${dbName}, role=${roleName}`, opts);
+    await applySchema(target, dbName, roleName, opts);
+  } finally {
+    await target.end();
+  }
+
+  if (args.printUriOnly) {
+    // User already has the URI — echo it back so this still works in pipelines.
+    stdout.write(`${targetUri}\n`);
+  } else {
+    log("done.", opts);
+    stdout.write("\n");
+    stdout.write("Brain tables installed in your existing DB. Paste this into\n");
+    stdout.write("Claude Code's `database_uri` user_config:\n");
+    stdout.write(`\n  ${targetUri}\n\n`);
+    stdout.write("Then `/reload-plugins` and run `/lmd:check-system` to verify.\n");
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
@@ -361,6 +481,10 @@ async function main() {
   }
 
   const opts = { silent: !!args.printUriOnly };
+
+  if (args.schemaOnly) {
+    return runSchemaOnly(args, opts);
+  }
 
   let adminUri = args.adminUri ?? process.env.ADMIN_URI;
   let dbName = args.dbName ?? process.env.DB_NAME;
@@ -429,7 +553,7 @@ async function main() {
   const target = new Client({ connectionString: newDbUri });
   try {
     await target.connect();
-    await applySchema(target, dbName, opts);
+    await applySchema(target, dbName, "ai_agent", opts);
   } finally {
     await target.end();
   }
