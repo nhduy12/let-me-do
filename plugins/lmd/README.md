@@ -102,6 +102,83 @@ Notes:
 - Stuck-loop bail: each sub-agent returns a 16-hex signature; autopilot keeps the last 3 per loop and bails `stuck_<loop>_loop` when all three match (orthogonal to the cap counter).
 - Every transition writes a row to `task_events`; resume on `/lmd:autopilot <id>` rehydrates all in-memory state from that table.
 
+## Requirements
+
+### Required
+
+- **Node.js ≥ 20** with `npm` on PATH. The brain MCP server uses ES modules + top-level `await`. On first launch the server auto-installs its npm deps (~12s, one-time).
+- **Postgres ≥ 13** reachable from the machine running Claude Code. Local Docker (`docker run -d -p 5432:5432 postgres:16`), Postgres.app, native install — anything works. Note: the bootstrap path (`Path A` of the brain DB setup) uses the standard URI path, so PgBouncer in `session` mode is fine; the legacy psql `setup.sql` does not work through PgBouncer because it uses `\c` to switch DBs.
+- **Git** initialized in your project repo + `git config user.email` set. Brain uses the email as `created_by` / `claimed_by` — `claim_task` will refuse to claim without it.
+- **`<repo-root>/CLAUDE.md`** in the project under test. Every sub-agent reads it at Step 0; without it the agents work blind on project conventions. Keep it under ~5k tokens so per-task cost stays predictable (Step 0 runs 7× per task).
+
+### Optional — runtime UI verification (tester agent + `/lmd:explore`)
+
+Skip these and `tester` will fall back to static-only verification — every "runtime" acceptance criterion will fail with a clear "create `.lmd/test-env.md`" / "install Playwright" message, but static-only tasks (backend, docs, refactor) still complete normally.
+
+- **Playwright** installed in the project under test:
+  ```bash
+  npm i -D @playwright/test
+  npx playwright install
+  ```
+  `tester` invokes Playwright via `npx playwright test`; it never installs Playwright itself (would mutate your lockfile).
+
+- **`<repo-root>/.lmd/test-env.md`** — free-form Markdown describing dev server URL(s) + test user credentials. Single-server projects need one URL + one login section; monorepo / FE+BE splits name each server so `tester` can map `scope → server`. Template at [`templates/test-env.md.example`](./templates/test-env.md.example). Minimal shape:
+
+  ```markdown
+  ## Test Server
+  Dev server: http://localhost:5173
+
+  ## Test Auth
+  Login URL: http://localhost:5173/login
+  Test users:
+    - default: test@example.com / testpass
+    - admin:   admin@example.com / adminpass
+  ```
+
+  Lives outside `.lmd/autopilot/` so Step 6 cleanup (which deletes per-task artifacts) never touches it.
+
+- **A running dev server** when you claim a runtime-heavy task. `tester` does NOT boot the server itself — long-lived processes are out of scope. Start it manually before `/lmd:claim-task`.
+
+### Recommended
+
+- **`.lmd/` in `.gitignore`** so per-task autopilot artifacts never end up in commits. The plugin's committer agent never stages files under `.lmd/`, but a manual `git add -A` could.
+
+  ```gitignore
+  .lmd/
+  ```
+
+  If you want to share `test-env.md` with the team (commit shared dev creds), carve out an exception:
+
+  ```gitignore
+  .lmd/
+  !.lmd/test-env.md
+  ```
+
+- **`<repo-root>/.lmdignore`** (gitignore syntax) marking generated / vendor / large-fixture paths that `reviewer` and `committer` must leave alone. Other agents (scouter, planner, developer, tester) are unaffected. Example:
+
+  ```gitignore
+  # Vendored / generated
+  **/generated/**
+  *.bundle.js
+  dist/
+  prisma/migrations/**
+
+  # Re-include one specific file from an excluded folder
+  !dist/runtime-config.json
+  ```
+
+  See [`.lmdignore` section below](#lmdignore) for full semantics.
+
+### Verify
+
+After install, run:
+
+```
+/lmd:check-system
+```
+
+Output ends with `RESULT: PASS (blocking=4/4, recommended=2/2, optional=2/2)` when everything is in place. The skill points at the exact fix command for every failed check.
+
 ## Install
 
 The repo is both a **marketplace** and a **plugin** — `.claude-plugin/marketplace.json` declares one plugin (`lmd`) whose source is the same repo root.
