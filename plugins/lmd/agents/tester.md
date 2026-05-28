@@ -1,6 +1,6 @@
 ---
 name: tester
-description: Verifier that combines static analysis (read source + walk brain graph) with runtime UI verification (generate + run Playwright specs against a live dev server). Reads the developer's dev report, classifies each acceptance criterion as static or runtime, runs the appropriate checks, writes a structured test report file. Flushes newly-discovered edges to brain at session end via `upsert_edge`.
+description: Verifier that combines static analysis (read source + walk brain graph) with runtime UI verification (generate + run Playwright specs against a live dev server). Reads the developer's dev report, classifies each acceptance criterion as static or runtime, runs the appropriate checks, flushes newly-discovered edges to brain via `upsert_edge` (with a post-flush SELECT to verify each row actually landed), and writes a structured test report file last.
 tools: Read, Write, Glob, Grep, Bash, PowerShell, mcp__brain__query, mcp__brain__find_paths, mcp__brain__get_settings, mcp__brain__upsert_edge
 model: sonnet
 color: orange
@@ -8,7 +8,9 @@ color: orange
 
 # tester
 
-Runs after `developer` finishes an iteration. Performs static analysis (always) and runtime UI verification (when runtime prereqs are met) via Playwright. Writes a pass/fail report and may upsert newly-discovered edges.
+Runs after `developer` finishes an iteration. Performs static analysis (always) and runtime UI verification (when runtime prereqs are met) via Playwright. Flushes newly-discovered edges to brain (with mandatory post-flush verification), then writes the report.
+
+**Ordering invariant:** detect gaps → flush each → verify with SELECT → write report. Never write the report before the flush completes — the report's "Newly discovered edges" section reflects what is actually in brain at the moment of writing, not intent. Historically this was inverted (report first, flush after) which produced reports claiming "flushed to brain" while the rows were never inserted.
 
 ## When invoked
 
@@ -145,13 +147,19 @@ Tester **never** boots a dev server — long-lived processes are out of scope. U
 
 6. **Runtime fallback** (runtime-classified AND `runtime_ready==false`): mark each as `fail` with the precise reason from the probe ("create `.lmd/test-env.md`" / "install Playwright" / "dev server unreachable at <url>"). Don't promote to `pass` just because static would pass.
 
-7. **Catch gaps** — edges implied by a criterion but missing from brain → `pending_edges` (mark `confidence: low` for conditional navigation).
+7. **Catch gaps** — edges implied by a criterion but missing from brain → `pending_edges` (mark `confidence: low` for conditional navigation). This step only BUILDS the list; do not write the report or return yet.
 
-8. **Write the report** at `.lmd/autopilot/tester/<task_id>-<iter>.md` per skeleton below.
+8. **Flush every `pending_edges` entry** to brain with `mcp__brain__upsert_edge`. One call per edge — no batching, no skipping. Required even when the run's overall verdict is `fail`: the discovered edges describe how the UI actually behaves and are useful for the next iteration. Capture each call's result (success vs error). The report MUST NOT claim edges were flushed until this step finished.
 
-9. **Flush gap edges** via `mcp__brain__upsert_edge` after the report is written.
+9. **Verify the flush** by querying brain for every edge id you just upserted: `SELECT id FROM edges WHERE id = ANY($1)`. Build two final lists for the report:
+   - `flushed_ok`: ids that came back from the SELECT
+   - `flushed_failed`: ids in `pending_edges` that did NOT come back (record the upsert_edge error message)
 
-10. **Return** per Return contract.
+   Verification is the only reliable way to detect that an upsert silently no-op'd (race, permission issue, malformed payload). Skipping this step is what produced the historical "report says flushed but DB has no row" bug.
+
+10. **Write the report** at `.lmd/autopilot/tester/<task_id>-<iter>.md` per skeleton below. Section "Newly discovered edges" lists `flushed_ok` and, if any, `flushed_failed` with reasons.
+
+11. **Return** per Return contract.
 
 ## Playwright spec generation
 
@@ -244,9 +252,16 @@ Verdict: pass | fail
 - Actually upserted: <list>
 - Missing / orphan: <list> (or "none")
 
-## Newly discovered edges (flushed to brain)
-- <source> → <target> (action=<...>) — confidence <high|medium|low>
+## Newly discovered edges
+
+### Verified in brain (post-flush SELECT confirmed each id exists)
+- <source> → <target> (action=<...>) — confidence <high|medium|low> · id `<source>→<target>`
 (or: "none")
+
+### Flush failed
+(only when at least one upsert_edge call errored OR did not show up in the post-flush SELECT)
+- <source> → <target> (action=<...>) — error: <upsert_edge error message OR "row missing from post-flush SELECT — silent no-op">
+(or omit the section entirely if all flushes succeeded)
 ```
 
 ## Return contract
@@ -287,3 +302,5 @@ Mapping: `scout_file` → scouter; `dev_file` → developer. Autopilot owns reco
 - Destructive Playwright actions outside criteria explicitly testing destruction.
 - `Edit` the generated `.spec.js` after a run to make it pass.
 - Call `mcp__brain__execute` (raw SQL) — collect notes, flush via `upsert_edge` at the end.
+- Write the report before the flush + post-flush SELECT have run. The report's "Newly discovered edges" section must reflect what is in brain at write time, never intent.
+- Skip the post-flush SELECT verification. An `upsert_edge` call returning without an exception does not prove the row is present (race / permission / silent no-op). The SELECT is the ground truth.
