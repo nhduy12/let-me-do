@@ -28,15 +28,22 @@ Every artifact lives in `.lmd/autopilot/<agent>/`. Sub-agents read each other's 
 
 ```
 /lmd:autopilot <task-id-or-prefix>
-   [--plan-cap N]      # default 2
-   [--dev-cap N]       # default 3
-   [--review-cap N]    # default 2
-   [--no-cap]          # disable all three caps
-   [--keep-artifacts]  # skip Step 6 cleanup on done
+   [--plan-cap N]       # default 2
+   [--dev-cap N]        # default 3
+   [--review-cap N]     # default 2
+   [--no-cap]           # disable all three caps
+   [--keep-artifacts]   # skip Step 6 cleanup on done
+   [--headed]           # tester runs Playwright with a visible browser so you can watch
+   [--slow-mo N]        # ms between Playwright actions when --headed (default 300)
 ```
 
 Defaults are tuned to keep a worst-case run under ~150k tokens for typical
 project sizes. Raise via `--*-cap` if you knowingly need more iterations.
+
+`--headed` only affects the tester's runtime Playwright spec — it does not
+make any other agent visible. Use when you want to verify by eye that the
+diff actually behaves correctly in the UI. Requires a display (won't work on
+CI / headless servers — tester will surface the Playwright error).
 
 ## Concepts
 
@@ -93,6 +100,8 @@ plan_sigs = plan_review_sigs = dev_sigs = test_sigs = review_sigs = []
 scout_file = approved_plan_file = last_dev_file = last_test_file = null
 prior_plan_file = prior_plan_review_file = prior_test_file = pending_review_feedback_file = null
 recovery_attempts = {}   # in-memory only; resets per /lmd:autopilot invocation
+headed = (--headed in args)               # default false
+slow_mo_ms = (--slow-mo N in args) ?? 300  # only used when headed=true
 ```
 
 ### 4. Hydrate (resume only)
@@ -223,7 +232,7 @@ LOOP:
   # tester
   tref = ".lmd/autopilot/tester/" + task_id + "-" + dev_iter + ".md"
   entry('test', dev_iter, tref)
-  t = Agent.spawn('tester', {task_id, iter:dev_iter, scout_file, dev_file:d.file})
+  t = Agent.spawn('tester', {task_id, iter:dev_iter, scout_file, dev_file:d.file, headed, slow_mo_ms})
   IF t.reason=='file_not_found': fnf(t); CONTINUE
   done('test', dev_iter, t.verdict, t.file, t.signature)
 
@@ -305,7 +314,8 @@ SWITCH r.need:
   developer:     Agent.spawn('developer',     {task_id, iter:n, scout_file, plan_file:approved_plan_file,
                               prior_test_file, prior_review_file:pending_review_feedback_file})
   tester:        Agent.spawn('tester',        {task_id, iter:n, scout_file,
-                              dev_file:".lmd/autopilot/developer/"+task_id+"-"+n+".md"})
+                              dev_file:".lmd/autopilot/developer/"+task_id+"-"+n+".md",
+                              headed, slow_mo_ms})
   reviewer:      Agent.spawn('reviewer',      {task_id, iter:n, scout_file,
                               dev_file:last_dev_file, test_file:last_test_file})
 # Caller then re-spawns the original failing agent at its own iter.

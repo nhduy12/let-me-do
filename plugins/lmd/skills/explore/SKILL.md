@@ -16,7 +16,7 @@ UI-driven graph enrichment. Invoke with `/lmd:explore <seed>` where seed is a UR
    - Node: `/lmd:explore web:login` → look up URL in brain.
    - Empty: ask the user.
 2. **Resolve auth** by reading `<repo-root>/.lmd/test-env.md` (same convention as `tester` — only source of test-env config). Missing file or missing relevant section → refuse with "create / fix `.lmd/test-env.md`" (see `plugins/lmd/templates/test-env.md.example`).
-3. **Launch Playwright** via `Bash` — `npx playwright codegen <url>` or a bundled walk script. Playwright is BYO (consumer installs).
+3. **Launch Playwright** via `Bash` — `npx playwright codegen <url>` or a bundled walk script. Playwright is BYO (consumer installs). Default mode is headed (visible browser) so the user can observe; `--headless` switches to no-window. Either way, append `--slow-mo=<slow_mo_ms>` (default 300) when headed so clicks are watchable; the flag is a no-op in headless. Headed without a display fails fast with a Playwright error mentioning DISPLAY / xvfb — surface it; do NOT silently fall back.
 4. **Walk loop** per page, sequentially. Every page visit MUST follow the wait-for-render sequence below — SPAs that hydrate client-side return a near-empty DOM at the `load` event, and reading state before hydration yields ghost graphs (empty `actions` arrays, missed overlays).
    - After every navigation (initial `page.goto` and after every action that changes URL):
      ```js
@@ -46,7 +46,13 @@ Edges from `/lmd:explore` are UI-verified — outrank `init` (static) and `dev` 
 /lmd:explore <seed> --auth admin             # named auth profile (or <server>.<profile> for multi-server)
 /lmd:explore <seed> --dry-run                # print candidates, don't write
 /lmd:explore <seed> --include-destructive    # walk Delete/Remove buttons
+/lmd:explore <seed> --headless               # default is headed (visible browser) since the
+                                             # walk is user-supervised; --headless skips the
+                                             # window when running in CI or over SSH
+/lmd:explore <seed> --slow-mo 500            # ms between Playwright actions (default 300)
 ```
+
+Default mode is **headed** — the walk is user-watched (5–15 min). Pass `--headless` only when you have no display or you're piping the walk into a script.
 
 ## Forbidden
 

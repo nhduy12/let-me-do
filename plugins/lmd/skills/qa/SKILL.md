@@ -22,7 +22,7 @@ Thin wrapper around the `tester` agent for standalone verification (no autopilot
    - If `.lmd/autopilot/scouter/<task_id>.md` exists, reuse; else write a minimal placeholder.
    - Pick `adhoc_iter` as a unix timestamp (numeric, won't collide with autopilot counters).
    - Write a synthetic dev report at `.lmd/autopilot/developer/<task_id>-<adhoc_iter>.md` from `git diff --stat` + a 2-line summary.
-3. Spawn `tester` with `task_id`, `iter: <adhoc_iter>`, `scout_file`, `dev_file`. Acceptance criteria pulled from brain.
+3. Spawn `tester` with `task_id`, `iter: <adhoc_iter>`, `scout_file`, `dev_file`, plus `headed` + `slow_mo_ms` parsed from `$ARGUMENTS` (default `false` / `300`). Acceptance criteria pulled from brain.
 4. Relay verdict by reading the returned test report file:
    - `pass` + summary.
    - `fail` + issue list + suggested fixes.
@@ -35,7 +35,11 @@ Thin wrapper around the `tester` agent for standalone verification (no autopilot
 /lmd:qa --task <id>             # specific task
 /lmd:qa --diff main..HEAD       # diff range
 /lmd:qa --no-save-gaps          # report only
+/lmd:qa --headed                # run Playwright with a visible browser
+/lmd:qa --headed --slow-mo 500  # slow down clicks (default 300ms when headed)
 ```
+
+`--headed` and `--slow-mo` propagate to the spawned `tester` (same semantics as in `/lmd:autopilot`). Needs a real display.
 
 ## Output
 

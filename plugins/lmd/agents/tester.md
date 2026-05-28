@@ -19,6 +19,8 @@ task_id: <id>
 iter: <N>                                              # matches the dev iteration being verified
 dev_file: .lmd/autopilot/developer/<task_id>-<N>.md    # required
 scout_file: .lmd/autopilot/scouter/<task_id>.md        # required
+headed: <bool>                                         # optional, default false — when true, run Playwright with a visible browser + slow-mo so the user can watch
+slow_mo_ms: <number>                                   # optional, default 300 (only used when headed=true)
 ```
 
 ## Step 0 — context scan
@@ -127,9 +129,13 @@ Tester **never** boots a dev server — long-lived processes are out of scope. U
 
 5. **Runtime verification** (only runtime-classified AND `runtime_ready`):
    - Generate spec at `.lmd/autopilot/tester/<task_id>-<iter>-runtime.spec.js`, one `test(...)` per runtime criterion. See "Playwright spec generation" below.
+   - Build the Playwright args. Append `--headed --slow-mo=<slow_mo_ms>` (default 300) when `headed=true` so the user can watch the browser. The slow-mo only fires in headed mode; headless ignores it. Build a `PW_EXTRA` shell variable up-front so both branches reuse the same string:
+     - Bash: `PW_EXTRA=""; if [ "$HEADED" = "1" ]; then PW_EXTRA="--headed --slow-mo=$SLOW_MO_MS"; fi`
+     - PowerShell: `$PW_EXTRA = if ($Headed) { "--headed --slow-mo=$SlowMoMs" } else { "" }`
    - Run with transient output directory **outside** `.lmd/` (Playwright `--output` creates a tree; Step 6 cleanup only handles flat files):
-     - Bash: `TMP_OUT=$(mktemp -d -t lmd-pw-XXXXXX); npx playwright test "<spec>" --reporter=json --output="$TMP_OUT" > "<json-out>" 2>&1 || true`
-     - PowerShell: `$TMP_OUT = (New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ("lmd-pw-" + [guid]::NewGuid().ToString('N').Substring(0,8)))).FullName; & npx playwright test "<spec>" --reporter=json --output="$TMP_OUT" *> "<json-out>"`
+     - Bash: `TMP_OUT=$(mktemp -d -t lmd-pw-XXXXXX); npx playwright test "<spec>" --reporter=json --output="$TMP_OUT" $PW_EXTRA > "<json-out>" 2>&1 || true`
+     - PowerShell: `$TMP_OUT = (New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ("lmd-pw-" + [guid]::NewGuid().ToString('N').Substring(0,8)))).FullName; & npx playwright test "<spec>" --reporter=json --output="$TMP_OUT" $PW_EXTRA *> "<json-out>"`
+   - Headed mode fails immediately on a display-less host (CI container, headless server) with a clear Playwright error mentioning `xvfb` / `DISPLAY`. Surface that error verbatim under `## Runtime prerequisites` and DO NOT silently fall back to headless — the user asked to watch; they need to know it couldn't open a window.
      (Playwright's non-zero exit on test failure is intentionally ignored — we still parse the JSON.)
    - Parse the JSON. Per test: `outcome=expected, status=passed` → pass. `failed` → capture error, assertion, screenshot path in `$TMP_OUT`.
    - For each failure, copy its screenshot to flat `.lmd/autopilot/tester/<task_id>-<iter>-screen-<criterion-slug>.png` (autopilot Step 6 prefix-matches these):
@@ -189,9 +195,9 @@ await expect(page.getByText(/saved successfully/i)).toBeVisible({ timeout: 5000 
 If a criterion's assertion still fails intermittently, prefer raising the per-criterion timeout in the spec (`test.setTimeout(60000)`) over removing waits — flaky tests mask real bugs.
 
 **Hard limits per invocation**:
-- 30s per criterion (`test.setTimeout`).
-- 5 min wall-clock total budget; kill the process and mark remaining as `fail (runtime budget exhausted)`.
-- Headless chromium only (no display).
+- 30s per criterion (`test.setTimeout`). In headed mode raise to 60s to absorb the slow-mo delay.
+- 5 min wall-clock total budget; kill the process and mark remaining as `fail (runtime budget exhausted)`. In headed mode raise to 10 min for the same reason.
+- Chromium only. Default headless; `headed=true` switches to a visible browser with `--slow-mo` (default 300ms) so the user can follow each action. Requires a real display — see headed-mode caveats in step 5 of the workflow.
 - Single browser context per spec; share login via `test.beforeAll`.
 - Skip destructive selectors (`Delete` / `Remove` / `Destroy` / `[data-destructive]`) UNLESS the criterion explicitly tests destruction; then use a throwaway test fixture, never the main test user.
 
