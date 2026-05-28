@@ -257,7 +257,8 @@ For richer intent, explicit slash skills are always available:
 /lmd:qa | /lmd:review | /lmd:commit   — ad-hoc tester / reviewer / committer wrappers (outside the autopilot pipeline)
 /lmd:explore <seed-url>          — Playwright UI walk
 /lmd:check-system                — diagnose setup (git, brain DB, optional QA prereqs)
-/lmd:init-brain                  — one-time bootstrap
+/lmd:init-brain                  — one-time graph bootstrap (scan routes → seed nodes/edges)
+/lmd:migrate-db                  — apply schema migrations after a plugin upgrade
 ```
 
 > Task dependencies are intentionally not modeled. If task A must precede task B, claim and finish A first — the workflow stays simple.
@@ -405,6 +406,15 @@ Equivalent to Path A. Doesn't work through PgBouncer (uses `\c` to switch DBs).
 - All paths are idempotent — re-running is safe.
 - `--print-uri-only` makes Paths A and B pipe-friendly (emit just the final URI on stdout, logs on stderr).
 - `node setup-db.mjs -h` shows all flags.
+
+### Upgrading the schema later
+
+When a plugin release adds new tables / indexes / function to the brain schema, you don't re-run the full setup. Use either:
+
+- **`/lmd:migrate-db`** inside Claude Code — wraps `setup-db.mjs --schema-only` against your current `database_uri`. Prompts for the URI once; runs the additive migration; suggests `/lmd:check-system` to verify.
+- **Terminal**: `node <plugin>/brain/server/setup-db.mjs --schema-only --auto --target-uri "<your-database_uri>"`.
+
+Both are idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE OR REPLACE FUNCTION`, `CREATE INDEX IF NOT EXISTS`). Breaking schema changes (column rename / drop / type change) will be documented in that version's release notes with a separate manual command — this migration path covers additive changes only.
 
 ### Verify isolation (Path A)
 
