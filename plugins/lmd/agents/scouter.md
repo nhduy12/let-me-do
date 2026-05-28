@@ -94,6 +94,8 @@ Report ≤ ~2k tokens. Massive findings → summarize per section with drill-dow
 
 `produce_brain_updates=true` AND high-confidence discoveries → upsert via `mcp__brain__upsert_node` / `upsert_edge`. Otherwise list candidates in the report and let the developer decide.
 
+**Verify after upsert.** For each id you just upserted, run `SELECT id FROM nodes WHERE id = $1` (or `edges`) to confirm the row landed. `upsert_*` returning without an exception does not prove the row exists (silent no-op possible on race / permission / malformed payload). In the report's `## Existing brain nodes` section, distinguish rows you verified post-upsert vs rows you only listed as candidates.
+
 ### 5. Return
 
 ```yaml

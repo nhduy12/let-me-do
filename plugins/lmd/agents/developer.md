@@ -50,8 +50,9 @@ Check `scout_file` and `plan_file` exist (always required). Check `prior_test_fi
 5. **Plan turns out wrong / incomplete during execution** (step unimplementable, critical detail missed, criterion can't be satisfied within the plan's design) → STOP. Don't improvise. Return `status: blocked, reason: 'plan-insufficient', detail: <what's broken>`. Autopilot will re-spawn the planner.
 6. Multi-scope tasks → handle every constituent in this single invocation per the plan.
 7. Brain writes happen after code is in place, before hand-off. Typed tools are parameterized + idempotent. Code rollbacks don't auto-revert brain mutations — brain stays at the latest write.
-8. Write the dev report at `.lmd/autopilot/developer/<task_id>-<iter>.md` per skeleton. One file per iter; don't overwrite older iters.
-9. Return per Return contract.
+8. **Verify every brain mutation.** For each id you upserted (or deleted), run `SELECT id FROM nodes WHERE id = $1` (or `edges`) to confirm the row exists (or is gone). `upsert_*` returning without an exception does not prove the row landed — race / permission / malformed payload can silently no-op. List the verified ids in the dev report's `## Brain mutations` section; anything that did NOT come back from the SELECT goes under `## Brain mutations failed` with the upsert error message.
+9. Write the dev report at `.lmd/autopilot/developer/<task_id>-<iter>.md` per skeleton. One file per iter; don't overwrite older iters. The report is written AFTER the verification step — the `## Brain mutations` section must reflect what is in brain at the moment of writing, never intent.
+10. Return per Return contract.
 
 ## Dev report skeleton
 
@@ -71,9 +72,16 @@ Addressing prior: <none | .lmd/autopilot/tester/<id>-<N-1>.md | .lmd/autopilot/r
 - path/to/file.ts — <one-liner, matches plan step>
 
 ## Brain mutations
+(verified post-write via SELECT)
 - upsert_node <id> — <reason>
 - upsert_edge <id> — <reason>
+- delete_node <id> — <reason>
 (or: "none")
+
+## Brain mutations failed
+(only when at least one upsert/delete errored OR did not show the expected post-write state)
+- upsert_edge <id> — error: <message OR "row missing from post-write SELECT — silent no-op">
+(omit the section entirely if all mutations verified)
 
 ## Acceptance criteria coverage
 - [x] criterion 1 — addressed via <file:line>
