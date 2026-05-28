@@ -13,7 +13,6 @@
   "license": "MIT",
   "keywords": ["claude-code", "agents", "automation", "mcp", "postgres", "graph", "memory"],
 
-  "agents": "./agents/",
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
 
