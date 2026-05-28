@@ -72,10 +72,30 @@ Set `PW_OK`.
 
 1. Split task's `Scope:` on ` + ` → constituents.
 2. Per constituent, pick `SERVERS` entry by closest prefix match. Single server → use it. No match + multiple → record ambiguity, skip.
-3. `TARGET_SERVERS` = deduplicated union. Probe each URL (HEAD/GET with 3s timeout, accept any 2xx/3xx/4xx):
-   - Bash: `curl -s -o /dev/null -m 3 -w "%{http_code}" "$U"` matches `^[234][0-9][0-9]$`.
-   - PowerShell: `try { (Invoke-WebRequest -Uri $U -Method Head -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop).StatusCode } catch { $_.Exception.Response.StatusCode.value__ }` in `[200, 499]`.
-4. Record `REACHABLE: Map<server, bool>`.
+3. `TARGET_SERVERS` = deduplicated union. Probe each URL with **retry-until-up** (handles dev servers mid-startup — first `npm run dev` compile can take 20–40s on Webpack / Vite cold start):
+   - Per URL: poll every 2s, accept any HTTP code in `[200, 499]`, give up after 30s wall-clock.
+   - Bash:
+     ```
+     for i in $(seq 1 15); do
+       code=$(curl -s -o /dev/null -m 3 -w "%{http_code}" "$U" || echo 000)
+       case "$code" in [234][0-9][0-9]) echo ok; break ;; esac
+       sleep 2
+     done
+     ```
+   - PowerShell:
+     ```
+     $ok=$false; for ($i=0; $i -lt 15; $i++) {
+       try {
+         $sc=(Invoke-WebRequest -Uri $U -Method Head -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop).StatusCode
+         if ($sc -ge 200 -and $sc -lt 500) { $ok=$true; break }
+       } catch {
+         $sc=$_.Exception.Response.StatusCode.value__
+         if ($sc -ge 200 -and $sc -lt 500) { $ok=$true; break }
+       }
+       Start-Sleep -Seconds 2
+     }
+     ```
+4. Record `REACHABLE: Map<server, bool>` based on the final state. Also record `REACHABLE_AFTER_MS` per server in the report's `## Runtime prerequisites` so the user sees if the dev server was unusually slow.
 
 **4. Auth coverage** — `AUTH_OK[server] = AUTH.has(server)`. Creds validated only when used in a spec.
 
@@ -131,23 +151,42 @@ Tester **never** boots a dev server — long-lived processes are out of scope. U
 
 One `test('<criterion-slug>', async ({ page }) => { ... })` block per runtime criterion. Derive actions from brain `find_paths` + scout + dev report.
 
+**Wait-for-render is mandatory.** Every `page.goto()` and every `page.click()` that triggers navigation must be followed by an explicit readiness signal BEFORE any assertion or interaction. SPAs that hydrate client-side will return a near-empty DOM at `load` event; locator-with-auto-retry can mask this but also stretches each criterion's timeout budget. Cheaper and more diagnostic to wait explicitly.
+
+Standard waits:
+
+- `await page.goto(url, { waitUntil: 'domcontentloaded' });` — then one of:
+- `await page.waitForLoadState('networkidle');` — best generic signal for SPAs (no network for 500ms). Use after `goto` and after any click that fetches data.
+- `await page.waitForSelector('<app-shell-selector>', { state: 'visible' });` — best when you know a stable mount anchor (a logo, nav bar). Faster than networkidle.
+
 Pattern reference:
 
 ```javascript
-// Auth (creds from .lmd/test-env.md `## Test Auth`)
-await page.goto(LOGIN_URL); await page.fill('input[name=email]', AUTH.email);
-await page.fill('input[name=password]', AUTH.password); await page.click('button[type=submit]');
-await page.waitForURL(/dashboard|home/);
+// Auth — wait for the login form to actually mount before filling.
+await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
+await page.waitForSelector('input[name=email]', { state: 'visible', timeout: 10000 });
+await page.fill('input[name=email]', AUTH.email);
+await page.fill('input[name=password]', AUTH.password);
+await page.click('button[type=submit]');
+await page.waitForURL(/dashboard|home/, { timeout: 10000 });
+await page.waitForLoadState('networkidle');
 
-// Navigation + element presence
-await page.goto(DEV_URL + '/settings');
+// Navigation + element presence — wait for the SPA route to settle.
+await page.goto(DEV_URL + '/settings', { waitUntil: 'domcontentloaded' });
+await page.waitForLoadState('networkidle');
 await expect(page.getByRole('button', { name: 'Delete account' })).toBeVisible();
 
-// Interaction + async assertion
+// Interaction that opens a modal — wait for the dialog to appear, not just exist.
 await page.getByRole('button', { name: 'Delete account' }).click();
-await expect(page.getByRole('dialog')).toBeVisible();
+await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 });
+
+// Interaction that fires a fetch — wait for network to settle before reading the toast.
+await page.getByRole('button', { name: 'Confirm' }).click();
+await page.waitForLoadState('networkidle');
 await expect(page.getByText(/saved successfully/i)).toBeVisible({ timeout: 5000 });
 ```
+
+If a criterion's assertion still fails intermittently, prefer raising the per-criterion timeout in the spec (`test.setTimeout(60000)`) over removing waits — flaky tests mask real bugs.
 
 **Hard limits per invocation**:
 - 30s per criterion (`test.setTimeout`).

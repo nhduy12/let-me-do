@@ -17,13 +17,19 @@ UI-driven graph enrichment. Invoke with `/lmd:explore <seed>` where seed is a UR
    - Empty: ask the user.
 2. **Resolve auth** by reading `<repo-root>/.lmd/test-env.md` (same convention as `tester` — only source of test-env config). Missing file or missing relevant section → refuse with "create / fix `.lmd/test-env.md`" (see `plugins/lmd/templates/test-env.md.example`).
 3. **Launch Playwright** via `Bash` — `npx playwright codegen <url>` or a bundled walk script. Playwright is BYO (consumer installs).
-4. **Walk loop** per page, sequentially:
-   - Capture URL, title, key text.
+4. **Walk loop** per page, sequentially. Every page visit MUST follow the wait-for-render sequence below — SPAs that hydrate client-side return a near-empty DOM at the `load` event, and reading state before hydration yields ghost graphs (empty `actions` arrays, missed overlays).
+   - After every navigation (initial `page.goto` and after every action that changes URL):
+     ```js
+     await page.waitForLoadState('domcontentloaded');
+     await page.waitForLoadState('networkidle');         // 500ms quiet net
+     // Optionally also: await page.waitForSelector('<known stable mount>', { state: 'visible' })
+     ```
+   - Then capture URL, title, and key text content.
    - Enumerate clickable / submittable elements (selectors, labels).
    - Skip destructive selectors by default — `[data-destructive]`, `[data-danger]`, or labels `Delete` / `Remove` / `Destroy`. `--include-destructive` to opt in.
-   - Hypothesize each target (from `href` / handler / on-click navigate), click, observe URL / DOM change, confirm or correct.
-5. **Detect overlays**: DOM mutation without URL change → overlay node `mounted_on` current page.
-6. **Stop** on: max depth (default 5, `--depth N`); revisits exceed threshold (graph saturated); auth wall; user interrupt.
+   - Hypothesize each target (from `href` / handler / on-click navigate), click, **wait for `networkidle` again**, observe URL / DOM change, confirm or correct.
+5. **Detect overlays**: DOM mutation without URL change → overlay node `mounted_on` current page. Wait `networkidle` after the trigger click before enumerating the overlay's content, same reason as above.
+6. **Stop** on: max depth (default 5, `--depth N`); revisits exceed threshold (graph saturated); auth wall; user interrupt; per-page wait-for-render timeout exceeded (default 15s per page).
 7. **Upsert** candidates via `mcp__brain__upsert_node` / `upsert_edge`. Empty states are valid paths to record (mark `confidence: low`).
 8. **Print summary**: pages visited, edges discovered, edges confirmed, flagged ambiguities.
 
