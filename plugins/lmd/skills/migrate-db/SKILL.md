@@ -1,6 +1,6 @@
 ---
 name: migrate-db
-description: Apply the plugin's current brain schema to your existing brain DB. Idempotent — adds new tables / indexes / function definitions shipped in a plugin update without touching existing rows. Run this after `claude plugin install lmd@let-me-do --upgrade` introduces a schema change, or whenever `/lmd:check-system` flags brain schema mismatch.
+description: Apply the plugin's current brain schema to your existing brain DB. Idempotent — adds new tables / indexes / function definitions shipped in a plugin update without touching existing rows. Run this after a plugin reinstall (`claude plugin marketplace update let-me-do` + `claude plugin install lmd@let-me-do`) introduces a schema change, or whenever `/lmd:check-system` flags brain schema mismatch.
 allowed-tools: Bash, Read, Glob, mcp__brain__get_settings
 user-invocable: true
 ---

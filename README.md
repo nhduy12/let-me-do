@@ -55,7 +55,7 @@ When the marketplace is updated:
 
 ```bash
 claude plugin marketplace update let-me-do
-claude plugin install lmd@let-me-do --scope project --upgrade
+claude plugin install lmd@let-me-do --scope project
 ```
 
 ## License

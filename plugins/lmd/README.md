@@ -214,9 +214,11 @@ claude --plugin-dir ./
 
 ### Updating after a marketplace bump
 
+Re-run the install command — it overwrites the cached copy. There is no `--upgrade` flag in Claude Code's plugin CLI.
+
 ```bash
 claude plugin marketplace update let-me-do
-claude plugin install lmd@let-me-do --scope project --upgrade
+claude plugin install lmd@let-me-do --scope project
 ```
 
 > The plugin folder ships as `let-me-do` but the registered name is `lmd` (shorter namespace — slash invocations look like `/lmd:create-task`, `/lmd:autopilot`).
