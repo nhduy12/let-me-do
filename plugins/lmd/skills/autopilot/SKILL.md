@@ -32,6 +32,7 @@ Every artifact lives in `.lmd/autopilot/<agent>/`. Sub-agents read each other's 
    [--dev-cap N]        # default 3
    [--review-cap N]     # default 2
    [--no-cap]           # disable all three caps
+   [--no-test]          # skip the tester step entirely; dev → review directly
    [--keep-artifacts]   # skip Step 6 cleanup on done
    [--headed]           # tester runs Playwright with a visible browser so you can watch
    [--slow-mo N]        # ms between Playwright actions when --headed (default 300)
@@ -39,6 +40,15 @@ Every artifact lives in `.lmd/autopilot/<agent>/`. Sub-agents read each other's 
 
 Defaults are tuned to keep a worst-case run under ~150k tokens for typical
 project sizes. Raise via `--*-cap` if you knowingly need more iterations.
+
+`--no-test` removes the `tester` from the loop: after `developer` completes,
+autopilot advances straight to `reviewer` (no `test` step events, no Playwright,
+no `dev ⇄ test` retry). The `dev` loop is then bounded only by the
+`review ⇄ dev` route, still capped by `--dev-cap`. Use for tasks where you
+accept the behavioral risk (throwaway spikes, pure-docs edits) or where you'll
+verify by hand afterward. `--no-test` and `--headed` are mutually exclusive in
+effect — with no tester there is nothing for `--headed` to show. Like
+`--headed`, this flag is per-invocation: re-pass it on resume.
 
 `--headed` only affects the tester's runtime Playwright spec — it does not
 make any other agent visible. Use when you want to verify by eye that the
@@ -57,7 +67,7 @@ CI / headless servers — tester will surface the Playwright error).
 | Loop | Default | On exhaust |
 |---|---|---|
 | plan ⇄ plan-review | 2 | `kind:'plan_unresolved'` |
-| dev ⇄ test          | 3 | `kind:'test_unresolved'` |
+| dev ⇄ test          | 3 | `kind:'test_unresolved'` (`dev_unresolved` under `--no-test`) |
 | review ⇄ dev        | 2 | `kind:'review_unresolved'` |
 | committer           | 1 (fixed) | `kind:'commit_failed'` |
 | file-not-found recovery | 3 per missing file | `kind:'recovery_exhausted'` |
@@ -100,7 +110,8 @@ plan_sigs = plan_review_sigs = dev_sigs = test_sigs = review_sigs = []
 scout_file = approved_plan_file = last_dev_file = last_test_file = null
 prior_plan_file = prior_plan_review_file = prior_test_file = pending_review_feedback_file = null
 recovery_attempts = {}   # in-memory only; resets per /lmd:autopilot invocation
-headed = (--headed in args)               # default false
+no_test = (--no-test in args)             # default false; skip tester, dev → review
+headed = (--headed in args)               # default false (ignored when no_test)
 slow_mo_ms = (--slow-mo N in args) ?? 300  # only used when headed=true
 ```
 
@@ -119,6 +130,8 @@ Run these queries on `task_events` (all use `kind='step'`):
 | `*_sigs` windows         | For each step, take 3 latest `signature` values; reverse to oldest-first |
 
 `scout_file` = `.lmd/autopilot/scouter/<task_id>.md` if it exists on disk. `approved_plan_file` / `last_dev_file` / `last_test_file` are derived paths at their respective iters.
+
+**`--no-test` resume:** there are no `step='test'` events, so the "passed test iter" row is empty and would leave `last_dev_file` null. When `no_test`, seed instead from `MAX(iter) WHERE step='dev' AND outcome='complete'` → `last_dev_file = .lmd/autopilot/developer/<task_id>-<that_iter>.md`, and `last_test_file = null`. (`prior_test_file` stays null — there is no failing test to feed back.)
 
 ### 5. Pre-bail (resume only)
 
@@ -202,7 +215,8 @@ LOOP:
 ```
 LOOP:
   dev_iter += 1
-  cap(dev_iter, dev_cap, 'test_unresolved', prior_test_file)
+  cap(dev_iter, dev_cap, no_test ? 'dev_unresolved' : 'test_unresolved',
+      no_test ? pending_review_feedback_file : prior_test_file)
 
   # developer
   dref = ".lmd/autopilot/developer/" + task_id + "-" + dev_iter + ".md"
@@ -229,7 +243,10 @@ LOOP:
   done('dev', dev_iter, 'complete', d.file, d.signature)   # bumps tasks.iteration
   push(dev_sigs, d.signature, 'stuck_dev_loop', d.file)
 
-  # tester
+  # tester — skipped entirely when no_test
+  IF no_test:
+    last_dev_file = d.file; last_test_file = null; BREAK   # → step3_loop, no test events
+
   tref = ".lmd/autopilot/tester/" + task_id + "-" + dev_iter + ".md"
   entry('test', dev_iter, tref)
   t = Agent.spawn('tester', {task_id, iter:dev_iter, scout_file, dev_file:d.file, headed, slow_mo_ms})
@@ -253,7 +270,7 @@ LOOP:
 
   rref = ".lmd/autopilot/reviewer/" + task_id + "-" + dev_iter + ".md"
   entry('review', dev_iter, rref)
-  rv = Agent.spawn('reviewer', {task_id, iter:dev_iter, scout_file, dev_file:last_dev_file, test_file:last_test_file})
+  rv = Agent.spawn('reviewer', {task_id, iter:dev_iter, scout_file, dev_file:last_dev_file, test_file:last_test_file, no_test})
   IF rv.reason=='file_not_found': fnf(rv); CONTINUE
   done('review', dev_iter, rv.verdict, rv.file, rv.signature)
 
@@ -317,8 +334,9 @@ SWITCH r.need:
                               dev_file:".lmd/autopilot/developer/"+task_id+"-"+n+".md",
                               headed, slow_mo_ms})
   reviewer:      Agent.spawn('reviewer',      {task_id, iter:n, scout_file,
-                              dev_file:last_dev_file, test_file:last_test_file})
+                              dev_file:last_dev_file, test_file:last_test_file, no_test})
 # Caller then re-spawns the original failing agent at its own iter.
+# Under no_test the reviewer never requests `need:tester`, so that branch stays dormant.
 ```
 
 `parse_iter_from_path(path)`: scouter paths have no iter — return `null`. Else strip the basename's leading `<task_id>-` prefix via literal substring (NEVER glob — `[scope]` is special); leading digits of the remainder are the iter (`3-devfeedback` → 3).

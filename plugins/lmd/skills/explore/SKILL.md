@@ -15,8 +15,10 @@ UI-driven graph enrichment. Invoke with `/lmd:explore <seed>` where seed is a UR
    - URL: `/lmd:explore http://localhost:5173/login`
    - Node: `/lmd:explore web:login` → look up URL in brain.
    - Empty: ask the user.
-2. **Resolve auth** by reading `<repo-root>/.lmd/test-env.md` (same convention as `tester` — only source of test-env config). Missing file or missing relevant section → refuse with "create / fix `.lmd/test-env.md`" (see `plugins/lmd/templates/test-env.md.example`).
-3. **Launch Playwright** via `Bash` — `npx playwright codegen <url>` or a bundled walk script. Playwright is BYO (consumer installs). Default mode is headed (visible browser) so the user can observe; `--headless` switches to no-window. Either way, append `--slow-mo=<slow_mo_ms>` (default 300) when headed so clicks are watchable; the flag is a no-op in headless. Headed without a display fails fast with a Playwright error mentioning DISPLAY / xvfb — surface it; do NOT silently fall back.
+2. **Resolve auth** by reading `<repo-root>/.lmd/test-env.md` (same convention as `tester` — only source of test-env config). Missing file or missing relevant section → refuse with "create / fix `.lmd/test-env.md`" (see `plugins/lmd/templates/test-env.md.example`). Honour the `Method:` of the resolved profile:
+   - `password` → drive the same-origin login form as before.
+   - `storageState` → load the saved session JSON (`Storage states:` path for the `--auth` profile) into the browser context; **do NOT visit the IdP**. This is the only auth that works for SSO apps (see step 3 + the Forbidden note on external origins). Missing state file → refuse with the `npx playwright codegen --save-storage=<path> <url>` capture command. If the walk immediately bounces off-origin or to a login route, the session is expired → stop and tell the user to refresh that file.
+3. **Launch Playwright** via `Bash` — `npx playwright codegen <url>` or a bundled walk script. For the `storageState` method, pass the saved session so the walk starts authenticated: `npx playwright codegen --load-storage=<path> <url>` (or `browser.newContext({ storageState: <path> })` in the walk script). Playwright is BYO (consumer installs). Default mode is headed (visible browser) so the user can observe; `--headless` switches to no-window. Either way, append `--slow-mo=<slow_mo_ms>` (default 300) when headed so clicks are watchable; the flag is a no-op in headless. Headed without a display fails fast with a Playwright error mentioning DISPLAY / xvfb — surface it; do NOT silently fall back.
 4. **Walk loop** per page, sequentially. Every page visit MUST follow the wait-for-render sequence below — SPAs that hydrate client-side return a near-empty DOM at the `load` event, and reading state before hydration yields ghost graphs (empty `actions` arrays, missed overlays).
    - After every navigation (initial `page.goto` and after every action that changes URL):
      ```js
@@ -58,7 +60,7 @@ Default mode is **headed** — the walk is user-watched (5–15 min). Pass `--he
 
 - Modify code.
 - Commit anything.
-- Navigate to external URLs (stay on target origin).
+- Navigate to external URLs (stay on target origin). For SSO apps this is exactly why the `storageState` auth method exists — load a saved session instead of walking the external IdP.
 - Submit destructive forms (DELETE, payment, etc.) without `--include-destructive`.
 
 ## Output

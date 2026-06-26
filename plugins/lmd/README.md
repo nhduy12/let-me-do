@@ -98,6 +98,7 @@ flowchart TD
 
 Notes:
 - Default caps (v0.2.0): plan = 2, dev = 3, review = 2, committer = 1, file-not-found recovery = 3 per missing file. Override via `--plan-cap` / `--dev-cap` / `--review-cap` / `--no-cap`.
+- `--no-test` drops the `tester` from the pipeline: `developer` hands off straight to `reviewer`, no `dev ⇄ test` loop and no Playwright. Behavior is then unverified — use only for throwaway spikes, pure-docs edits, or when you'll verify by hand. The `dev` loop is still bounded by `--dev-cap` via the `review ⇄ dev` route. Per-invocation flag (re-pass on resume); the reviewer marks the review report `Test verdict: skipped (--no-test)`.
 - `dev_cap` is NOT reset when reviewer requests changes — it stays scoped to the whole task so a ping-pong review/dev loop cannot exhaust unbounded dev iters.
 - Stuck-loop bail: each sub-agent returns a 16-hex signature; autopilot keeps the last 3 per loop and bails `stuck_<loop>_loop` when all three match (orthogonal to the cap counter).
 - Every transition writes a row to `task_events`; resume on `/lmd:autopilot <id>` rehydrates all in-memory state from that table.
@@ -135,7 +136,7 @@ Skip these and `tester` will fall back to static-only verification — every "ru
     - admin:   admin@example.com / adminpass
   ```
 
-  Lives outside `.lmd/autopilot/` so Step 6 cleanup (which deletes per-task artifacts) never touches it.
+  Lives outside `.lmd/autopilot/` so Step 6 cleanup (which deletes per-task artifacts) never touches it. Apps behind **SSO / an external IdP** use `Method: storageState` instead of inline creds — see [SSO / external-IdP login](#sso--external-idp-login-method-storagestate).
 
 - **A running dev server** when you claim a runtime-heavy task. `tester` does NOT boot the server itself — long-lived processes are out of scope. Start it manually before `/lmd:claim-task`.
 
@@ -322,6 +323,29 @@ Test users:
 ```
 
 If `.lmd/test-env.md` is missing, every runtime-classified criterion fails with the instruction to create the file. Static checks still run.
+
+### SSO / external-IdP login (`Method: storageState`)
+
+If your app delegates login to an **external identity provider** (Azure AD, Google, Okta, Auth0, Keycloak, …), the default same-origin email/password flow can't work — the IdP form is on another origin, usually multi-step, and often gated by MFA. Tester (and `/lmd:explore`) instead replay a **saved session**: you log in once, hand them a Playwright storage-state file, and they skip the login screen entirely.
+
+```markdown
+## Test Auth
+
+Method: storageState
+Storage states:
+  - default: .lmd/auth/default.json
+  - admin:   .lmd/auth/admin.json
+```
+
+Capture / refresh a state file (whenever tester reports it expired):
+
+```bash
+npx playwright codegen --save-storage=.lmd/auth/default.json https://your-app.example.com
+# log in through SSO in the opened browser (complete any MFA), reach an
+# authenticated page, then close the window — cookies + localStorage are saved.
+```
+
+State files live under `.lmd/auth/` (outside `.lmd/autopilot/`, so Step 6 cleanup never deletes them). They hold **live session tokens** — never commit them; the default `.lmd/` gitignore rule already keeps them local (do **not** add a `!.lmd/auth/...` exception). A stale session is reported as a runtime-prerequisite failure (`storageState expired`), not a code bug, so it never loops the developer.
 
 **Gitignore policy** — both patterns work:
 - **Commit** for shared team creds: add `!.lmd/test-env.md` to your `.gitignore` after the `.lmd/` rule so the file escapes the per-task artifact ignore.

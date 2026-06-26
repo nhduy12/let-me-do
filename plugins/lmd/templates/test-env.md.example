@@ -14,9 +14,11 @@ named user credentials are unambiguous.
 ## Test Server
 
 Dev server: http://localhost:5173
-Start command: npm run dev   # informational only — tester never runs it
+Start command: npm run dev   # tester auto-starts if probe fails, then kills on exit
 
 ## Test Auth
+
+Method: password        # password (default) | storageState — see the SSO block below
 
 Login URL: http://localhost:5173/login
 
@@ -26,6 +28,35 @@ Test users:
 
 Throwaway destroyable user (for delete-account tests):
   - throwaway-pool: see scripts/seed-throwaway.ts
+
+# ----------------------------------------------------------------------
+# SSO / external-IdP auth (Azure AD, Google, Okta, Auth0, Keycloak, …):
+#
+# When the app redirects login to an EXTERNAL identity provider, tester
+# cannot drive the IdP form (different origin, multi-step, often MFA).
+# Instead, log in ONCE yourself and hand tester a saved session. Replace
+# the `## Test Auth` block above with:
+#
+# ## Test Auth
+#
+# Method: storageState
+# Storage states:
+#   - default: .lmd/auth/default.json
+#   - admin:   .lmd/auth/admin.json
+#
+# Tester loads the JSON into the browser context (cookies + localStorage)
+# and SKIPS the login screen entirely — it never touches the IdP.
+#
+# Create / refresh a state file (do this whenever tester reports the
+# session expired):
+#   npx playwright codegen --save-storage=.lmd/auth/default.json https://your-app.example.com
+# …log in through SSO in the opened browser (complete any MFA), reach an
+# authenticated page, then CLOSE the window. The cookies + localStorage
+# are written to the JSON.
+#
+# SECURITY: these files hold LIVE session tokens. NEVER commit them —
+# keep `.lmd/auth/` gitignored (the default `.lmd/` rule already covers
+# it; do NOT add a `!.lmd/auth/...` exception).
 
 # ----------------------------------------------------------------------
 # Multi-server example (delete the single-server sections above and use
@@ -40,15 +71,19 @@ Throwaway destroyable user (for delete-account tests):
 #
 # ## Test Auth
 #
-# - lms:
+# - lms:                                   # password method (same-origin form)
 #     Login URL: http://localhost:5173/login
 #     Users:
 #       - default: test@lms.com / testpass
 #       - admin:   admin@lms.com / adminpass
-# - crm:
-#     Login URL: http://localhost:5174/sign-in
-#     Users:
-#       - default: test@crm.com / testpass
+# - crm:                                   # storageState method (SSO behind external IdP)
+#     Method: storageState
+#     Storage states:
+#       - default: .lmd/auth/crm-default.json
+#       - admin:   .lmd/auth/crm-admin.json
+#
+# Each server picks its own method independently — mix password and
+# storageState freely.
 #
 # Tester maps a task's Scope (lms / lms-auth / crm / lms + crm) to the
 # right named server by closest prefix match. Reference auth profiles as
