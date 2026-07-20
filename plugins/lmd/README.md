@@ -251,6 +251,7 @@ Task id format: `<YYYYMMDD>-<NNN>-[<scope>]-<slug>`
 For richer intent, explicit slash skills are always available:
 
 ```
+/lmd:help [topic]               — how to use the plugin (topic: setup|tasks|autopilot|qa|brain|commands|troubleshoot)
 /lmd:create-task "..."          — file a new task
 /lmd:list-tasks                  — list mine + open pool
 /lmd:status <id>                 — task detail
