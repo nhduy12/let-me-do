@@ -41,7 +41,7 @@ Do these once per project, in order. `/lmd:check-system` verifies all of it and 
 1. **Prerequisites**: Node ≥ 20 + npm on PATH; Postgres ≥ 13 reachable; `git init` done with `git config user.email` set (brain uses the email as the task owner — claim refuses without it); a `<repo-root>/CLAUDE.md` describing project conventions (every agent reads it — keep it under ~5k tokens, it's loaded ~7× per task).
 2. **Bootstrap the brain DB** (one-time): from `<plugin-root>/brain/server`, run `node setup-db.mjs` (interactive — creates the DB, the `ai_agent` role, tables, indexes, and prints the connection string). Use a dedicated DB per project. Paths B (schema-only) and C (legacy psql) exist for existing DBs — see the README.
 3. **Set the plugin config**: after install, Claude Code prompts for `database_uri` (the string setup-db printed), `statement_timeout_ms` (default 5000), `max_rows` (default 500).
-4. **Seed the graph** (optional but recommended for UI-heavy repos): `/lmd:init-brain` scans routes + page components and seeds low-confidence nodes/edges.
+4. **Bootstrap the project** (optional but recommended for UI-heavy repos): `/lmd:init` scans routes + page components to seed low-confidence nodes/edges, and scaffolds a pre-filled `.lmd/test-env.md`. `--no-test-env` / `--test-env-only` pick just one half.
 5. **Runtime QA** (optional — only if tasks need live-UI verification): install Playwright in the project and create `<repo-root>/.lmd/test-env.md`. See **Runtime QA** below.
 6. **Recommended hygiene**: add `.lmd/` to `.gitignore` (per-task artifacts); optionally a `.lmdignore` to keep generated/vendored paths out of the reviewer + committer.
 7. **Verify**: `/lmd:check-system` should end with `RESULT: PASS`.
@@ -62,7 +62,7 @@ You:    "Start the first one."                  → claim-task #1 → autopilot 
 ```
 /lmd:help [topic]            — this guide (topic: setup|tasks|autopilot|qa|brain|commands|troubleshoot)
 /lmd:check-system            — diagnose setup (git, brain DB, optional QA prereqs); run this first
-/lmd:init-brain              — one-time graph bootstrap (scan routes → seed nodes/edges)
+/lmd:init                    — one-time bootstrap: seed graph (routes → nodes/edges) + scaffold a pre-filled .lmd/test-env.md (--no-test-env / --test-env-only to pick one)
 /lmd:migrate-db              — apply additive brain schema migrations after a plugin upgrade
 
 /lmd:create-task "..."       — file a new task (probes scope + acceptance criteria, never the "how")
@@ -96,7 +96,7 @@ The `tester` classifies each acceptance criterion as **static** (code + brain) o
 
 1. Playwright in the project: `npm i -D @playwright/test && npx playwright install` (tester never installs it — won't touch your lockfile).
 2. A dev server already running — tester does NOT boot it.
-3. `<repo-root>/.lmd/test-env.md` with the dev server URL(s) + test users. Template at `${CLAUDE_PLUGIN_ROOT}/templates/test-env.md.example`.
+3. `<repo-root>/.lmd/test-env.md` with the dev server URL(s) + test users. Fastest: `/lmd:init` (or `/lmd:init --test-env-only`) scaffolds a pre-filled draft from the codebase — you just confirm the `# TODO` fields. Manual base template at `${CLAUDE_PLUGIN_ROOT}/templates/test-env.md.example`.
 
 **SSO / external IdP** apps can't use inline email/password — use `Method: storageState` with a saved Playwright session (`npx playwright codegen --save-storage=.lmd/auth/default.json <url>`). State files hold live tokens: keep them under `.lmd/auth/` and never commit them.
 

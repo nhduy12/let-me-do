@@ -77,7 +77,7 @@ Pass when `n == 4`. Fix: schema not initialized. Run `node <plugin-root>/brain/s
 Fix: `npm i -D @playwright/test && npx playwright install`. Skip if not using runtime QA — tester falls back to static-only.
 
 **8. `<repo-root>/.lmd/test-env.md`** _(runtime QA + `/lmd:explore`)_ — `Read` succeeds.
-Fix: `mkdir -p .lmd && cp <plugin-root>/templates/test-env.md.example .lmd/test-env.md`, then edit. See `agents/tester.md` → "Test-env file".
+Fix: run `/lmd:init --test-env-only` to scaffold a pre-filled draft from the codebase (confirm its `# TODO` fields), or manually `mkdir -p .lmd && cp <plugin-root>/templates/test-env.md.example .lmd/test-env.md` then edit. See `agents/tester.md` → "Test-env file".
 
 ## Render the report
 
@@ -94,7 +94,7 @@ Recommended
 
 Optional
   ✗ 7. Playwright installed                 fix: npm i -D @playwright/test && npx playwright install
-  ✗ 8. .lmd/test-env.md exists              fix: mkdir -p .lmd && cp <plugin-root>/templates/test-env.md.example .lmd/test-env.md
+  ✗ 8. .lmd/test-env.md exists              fix: /lmd:init --test-env-only  (or cp <plugin-root>/templates/test-env.md.example .lmd/test-env.md)
 
 RESULT: PASS (blocking=4/4, recommended=1/2, optional=0/2)
 ```

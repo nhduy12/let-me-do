@@ -26,7 +26,7 @@ let-me-do/
 │   ├── commit/SKILL.md
 │   ├── explore/SKILL.md
 │   ├── check-system/SKILL.md
-│   └── init-brain/SKILL.md
+│   └── init/SKILL.md
 ├── brain/                        ← foundation
 │   ├── server/                  ← MCP server (Node, stdio) exposing typed tools
 │   │   ├── package.json
@@ -136,7 +136,9 @@ Skip these and `tester` will fall back to static-only verification — every "ru
     - admin:   admin@example.com / adminpass
   ```
 
-  Lives outside `.lmd/autopilot/` so Step 6 cleanup (which deletes per-task artifacts) never touches it. Apps behind **SSO / an external IdP** use `Method: storageState` instead of inline creds — see [SSO / external-IdP login](#sso--external-idp-login-method-storagestate).
+  Lives outside `.lmd/autopilot/` so Step 6 cleanup (which deletes per-task artifacts) never touches it. Apps behind **SSO / an external IdP** use `Method: storageState` instead of inline creds — see [SSO / external-IdP login](#sso--external-idp-login-method-storagestate). Multi-app systems where each app is reached only by clicking through a portal declare **entry paths** (a `## Entry paths` section + `Shared session`) so `tester` navigates in from the portal instead of deep-linking.
+
+  **Fastest way to create it:** `/lmd:init` (or `/lmd:init --test-env-only`) scans the codebase and writes a pre-filled `.lmd/test-env.md` — server URLs, start commands, detected auth method, and portal entry-path stubs — leaving `# TODO` markers only where it needs you (credentials, storageState capture, portal button labels). It never overwrites an existing file (writes `.lmd/test-env.generated.md` to diff instead).
 
 - **A running dev server** when you claim a runtime-heavy task. `tester` does NOT boot the server itself — long-lived processes are out of scope. Start it manually before `/lmd:claim-task`.
 
@@ -261,7 +263,7 @@ For richer intent, explicit slash skills are always available:
 /lmd:qa | /lmd:review | /lmd:commit   — ad-hoc tester / reviewer / committer wrappers (outside the autopilot pipeline)
 /lmd:explore <seed-url>          — Playwright UI walk
 /lmd:check-system                — diagnose setup (git, brain DB, optional QA prereqs)
-/lmd:init-brain                  — one-time graph bootstrap (scan routes → seed nodes/edges)
+/lmd:init                        — one-time bootstrap: seed graph (routes → nodes/edges) + scaffold pre-filled .lmd/test-env.md  (--no-test-env | --test-env-only | --dry-run)
 /lmd:migrate-db                  — apply schema migrations after a plugin upgrade
 ```
 
@@ -306,7 +308,7 @@ For runtime verification to work, three prerequisites must exist:
    npx playwright install
    ```
 2. **A dev server reachable** when autopilot runs. Tester does NOT boot the server itself — start it manually before claiming a runtime-heavy task.
-3. **A `.lmd/test-env.md` file at repo root** describing your dev server URL(s) and test users. Format is free-form Markdown — single-server projects need one URL + a login section; multi-server (monorepo, FE+BE split) projects name the servers so tester can map scope → server. See `plugins/lmd/templates/test-env.md.example` for both shapes.
+3. **A `.lmd/test-env.md` file at repo root** describing your dev server URL(s) and test users. Format is free-form Markdown — single-server projects need one URL + a login section; multi-server (monorepo, FE+BE split) projects name the servers so tester can map scope → server. Let `/lmd:init --test-env-only` scaffold a pre-filled draft from the codebase, or copy `plugins/lmd/templates/test-env.md.example` (both shapes, plus the portal entry-path shape) and edit by hand.
 
 Minimal single-server example:
 
