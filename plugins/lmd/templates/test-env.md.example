@@ -90,6 +90,61 @@ Throwaway destroyable user (for delete-account tests):
 # `<server>.<profile>` from /lmd:explore --auth.
 #
 # ----------------------------------------------------------------------
+# Portal + non-deep-linkable apps (SSO handoff) — a multi-app system
+# where ONE Keycloak/SSO login lands on a portal, and each app is reached
+# ONLY by clicking a portal button (the portal mints a one-time handoff;
+# opening the app URL directly bounces or 404s). Two extra concepts:
+#
+#   1. Shared SSO session — one saved login covers every app in the realm,
+#      so you don't repeat the storage-state path per server.
+#   2. Entry paths — the click recipe that carries tester from the portal
+#      into each app. Tester runs the entry path FIRST, then the
+#      criterion's own actions.
+#
+# ## Test Servers
+#
+# - portal: https://portal.example.com (npm run dev --workspace=portal)
+# - app-a:  https://app-a.example.com   # reached via entry path, not directly
+# - app-b:  https://app-b.example.com   # reached via entry path, not directly
+#
+# ## Test Auth
+#
+# Method: storageState
+# Shared session: true              # one login for the whole realm
+# Applies to: portal, app-a, app-b  # or `all` — every declared server
+# Storage states:
+#   - default: .lmd/auth/sso-default.json
+#   - admin:   .lmd/auth/sso-admin.json
+#
+# ## Entry paths
+#
+# # How tester reaches each non-deep-linkable app. Free-form; each step is
+# # `<verb> <target>` where target is a Playwright-style locator:
+# #   role=<role> name="<text>" | text="<text>" | label="<text>"
+# #   | testid=<id> | css=<selector>          (a bare word ⇒ link/button by name)
+# # Verbs: click | fill <target> = <value> | goto <url> | wait <target|url>
+# #
+# - app-a:
+#     Start: portal                          # server (or URL) to begin from
+#     Steps:
+#       - click role=button name="Learning App"
+#     Landing: https://app-a.example.com     # URL/regex tester waits for after handoff
+# - app-b:
+#     Start: portal
+#     Steps:
+#       - click text="CRM"
+#     Landing: https://app-b.example.com
+#
+# Capture the shared session ONCE, visiting each app during capture so any
+# per-app localStorage/token is saved too (the Keycloak realm cookie — which
+# powers silent SSO into each app — is saved after the first SSO login):
+#   npx playwright codegen --save-storage=.lmd/auth/sso-default.json https://portal.example.com
+# …log in through Keycloak, click into app-a then app-b, then CLOSE the window.
+#
+# Refresh the same way whenever tester reports the session expired. Enrich
+# brain with the portal→app edges via: /lmd:explore <portal-url> --auth default
+#
+# ----------------------------------------------------------------------
 # Gitignore policy is up to you:
 #
 #   - COMMIT the file when test creds are shared across the team (test

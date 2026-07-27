@@ -38,9 +38,10 @@ slow_mo_ms: <number>                                   # optional, default 300 (
 Free-form Markdown — no strict schema. What tester needs:
 
 - One or more dev servers, each with a URL. Multi-server projects (monorepo, FE+BE) **name** the servers so tester can map scope → server.
-- Test auth info per server (login URL + named user profiles) when criteria need login.
+- Test auth info per server (login URL + named user profiles) when criteria need login. A single SSO login may be **shared** across many servers (`Shared session: true` — see "Portal handoff" below).
+- Optional **entry paths** for apps that are reachable only by navigating in from another server (a portal), never by opening their URL directly.
 
-See `plugins/lmd/templates/test-env.md.example` for working single-server and multi-server shapes.
+See `plugins/lmd/templates/test-env.md.example` for working single-server, multi-server, and portal-handoff shapes.
 
 **Scope → server**: closest prefix match by name. Scope `lms-auth` → server `lms`. Multi-scope (`lms + crm`) runs criteria against each matched server. Single-server project: any scope → the only server. No match + multiple servers → criterion fails with `"no server matches scope <x>"`.
 
@@ -56,6 +57,22 @@ Tester then **never visits the IdP**: it builds the browser context with `{ stor
 
 **Storage-state files live under `<repo-root>/.lmd/auth/`** (outside `.lmd/autopilot/`, so Step 6 cleanup never deletes them). They hold live session tokens — tester only ever **reads** them, never writes, prints, or commits them.
 
+### Portal handoff (non-deep-linkable apps)
+
+Some multi-app systems put every app behind **one portal**: after SSO the user lands on the portal, and each app is entered ONLY by clicking a portal button (the portal mints a one-time SSO handoff). Opening the app URL directly bounces to the portal/IdP or 404s — so the usual "load storageState, `goto` the app route" does not reach the app.
+
+Two declarations handle this:
+
+- **Shared session** — a realm-level `## Test Auth` block with `Method: storageState`, `Shared session: true`, and `Applies to: <server-list>` (or `all`). The listed servers all resolve to the SAME `Storage states:` path for a given profile — one Keycloak login covers the whole realm. The saved session's Keycloak realm cookie is what makes the portal (and each app's silent-SSO handoff) authenticated.
+- **Entry paths** — a `## Entry paths` section keyed by server name. Each entry declares `Start:` (a server name or URL to begin from — usually the portal), an ordered `Steps:` list (the click recipe into the app), and `Landing:` (the URL/regex the app settles on after handoff). Tester runs the entry path **first**, then the criterion's own actions.
+
+Step grammar (free-form — use judgment, same as the rest of this file). Each step is `<verb> <target> [= <value>]`:
+
+- verbs: `click` · `fill <target> = <value>` · `goto <url>` · `wait <target|url>`
+- target locators: `role=<role> name="<text>"` · `text="<text>"` · `label="<text>"` · `testid=<id>` · `css=<selector>` · a bare word ⇒ link/button by accessible name
+
+An app with an entry path is **never** opened by direct `goto`; a server with no entry path is direct-`goto` as before. See the portal-handoff shape in `test-env.md.example`.
+
 ## Pre-flight — input files
 
 Check `scout_file` and `dev_file` exist. Either missing → return per File-not-found contract below.
@@ -64,13 +81,15 @@ Check `scout_file` and `dev_file` exist. Either missing → return per File-not-
 
 Non-fatal — results into the report. Four probes; record `TEST_ENV_OK`, `PW_OK`, `REACHABLE: Map`, `AUTH_OK: Map`. Use Bash on POSIX (Linux / macOS / Git Bash / WSL) or PowerShell on Windows native.
 
-**1. Test-env parse** — `Read` `.lmd/test-env.md`. Build three in-memory maps:
+**1. Test-env parse** — `Read` `.lmd/test-env.md`. Build four in-memory maps:
 
 - `SERVERS: Map<name, url>` — one entry per declared server. Single unnamed server → store as `default`.
 - `AUTH: Map<server-name, { method, ... }>` — only servers with auth info. `method` is `password` (default when omitted) or `storageState`:
   - `password` → `{ method:'password', loginUrl, users: Map<profile, {email, password}> }`.
   - `storageState` → `{ method:'storageState', states: Map<profile, path> }` parsed from the `Storage states:` list (SSO / external-IdP apps — see "SSO auth" below). No `loginUrl`, no inline creds.
+  - **Shared session** — a realm-level `## Test Auth` block (no per-server key) with `Shared session: true` and `Applies to: <list>|all` fans the SAME storageState entry out to every listed server: for each such server set `AUTH[server] = { method:'storageState', states, shared:true }`. A per-server auth block still overrides the shared one for that server. `all` = every entry in `SERVERS`.
 - `START_CMDS: Map<server-name, cmd>` — extracted from `Start command:` lines (single-server) or the parenthesized `(npm run dev --workspace=lms)` form (multi-server). Strip trailing inline comments (`# ...`). Servers without a documented start command are not auto-startable.
+- `ENTRY: Map<server-name, { start, steps:[{verb,target,value?}], landing }>` — from the `## Entry paths` section (absent → empty map). `start` is a server name (resolve to its URL via `SERVERS`) or a literal URL; `steps` is the ordered click recipe; `landing` is the URL/regex the app settles on after handoff. A server present in `ENTRY` is reached ONLY via its path — never by direct `goto` (see step 5). Parse the step grammar from "Portal handoff" above; ambiguity → record in `## Runtime prerequisites` and pick the most sensible reading.
 
 Use judgment when parsing free-form Markdown — look for URLs, credential pairs, names, start commands. Ambiguity → record in the report's `## Runtime prerequisites` and pick the most sensible interpretation; don't fail the whole probe.
 
@@ -87,6 +106,7 @@ Set `PW_OK`.
 
 1. Split task's `Scope:` on ` + ` → constituents.
 2. Per constituent, pick `SERVERS` entry by closest prefix match. Single server → use it. No match + multiple → record ambiguity, skip.
+   - **Entry-path servers**: if the picked server is in `ENTRY`, its app URL is not independently reachable (deep-link bounces). Add its `start` server (the portal) to `TARGET_SERVERS` and probe/auto-start THAT instead; set `REACHABLE[app] = REACHABLE[start]`. Reaching the app itself is the runtime spec's job (step 5), not the HTTP probe's.
 3. `TARGET_SERVERS` = deduplicated union. Probe each URL with **retry-until-up** (handles dev servers mid-startup — first `npm run dev` compile can take 20–40s on Webpack / Vite cold start):
    - Per URL: poll every 2s, accept any HTTP code in `[200, 499]`, give up after 30s wall-clock.
    - Bash:
@@ -131,7 +151,7 @@ Set `PW_OK`.
    - No `START_CMDS` entry + unreachable → don't attempt to start; behave as today (criterion fails with "dev server not reachable; configure `Start command:` in `.lmd/test-env.md` or start it manually").
 5. Record `REACHABLE: Map<server, bool>` based on the final state (after any auto-start attempt). Also record `REACHABLE_AFTER_MS` per server in the report's `## Runtime prerequisites` so the user sees if the dev server was unusually slow. Mark each server in the report as `pre-existing` or `started-by-tester`.
 
-**4. Auth coverage** — `AUTH_OK[server] = AUTH.has(server)`. Password creds are validated only when used in a spec. For `method:'storageState'`, additionally check each referenced state file **exists on disk** (`Read`/stat the path). A declared-but-missing state file → `AUTH_OK[server]=false` and record in `## Runtime prerequisites`: `storage state <path> missing — capture it with 'npx playwright codegen --save-storage=<path> <app-url>'`. (Whether the saved session is still *valid* can only be known at spec runtime — see the expired-session guard in step 5.)
+**4. Auth coverage** — `AUTH_OK[server] = AUTH.has(server)`. Password creds are validated only when used in a spec. For `method:'storageState'`, additionally check each referenced state file **exists on disk** (`Read`/stat the path). A declared-but-missing state file → `AUTH_OK[server]=false` and record in `## Runtime prerequisites`: `storage state <path> missing — capture it with 'npx playwright codegen --save-storage=<path> <capture-url>'`, where `<capture-url>` is the app URL for a direct server, or the **portal / `start` URL** for a `shared:true` or entry-path server (that's the origin the SSO login happens on). A shared state file is checked once even though many servers reference it. (Whether the saved session is still *valid* can only be known at spec runtime — see the expired-session guard in step 5.)
 
 `runtime_ready = (TEST_ENV_OK AND PW_OK AND every TARGET_SERVER is REACHABLE)`.
 
@@ -236,12 +256,48 @@ test.beforeAll(async ({ browser }) => {
   const page = await (await browser.newContext({ storageState: STORAGE_STATE_PATH })).newPage();
   await page.goto(DEV_URL + '/<an-authenticated-route>', { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle');
+  // Tolerate a brief silent-SSO round trip (app → Keycloak → back to app): only conclude the
+  // session is dead if we have NOT returned to the app origin after a short grace wait.
+  await page.waitForURL(u => new URL(u).origin === new URL(DEV_URL).origin, { timeout: 8000 }).catch(() => {});
   const u = new URL(page.url());
-  const offOrigin = u.origin !== new URL(DEV_URL).origin;        // redirected to the IdP
-  const onLogin = /login|signin|sign-in|auth/i.test(u.pathname); // bounced to app login route
+  const offOrigin = u.origin !== new URL(DEV_URL).origin;        // still parked on the IdP
+  const onLogin = /login|signin|sign-in|auth|realms\//i.test(u.pathname); // bounced to a login route
   if (offOrigin || onLogin) {
     throw new Error('STORAGE_STATE_EXPIRED');  // tester maps this to a runtime-prereq failure, not a dev bug
   }
+});
+
+// Auth method C — storageState + portal entry path (app is NOT deep-linkable; ENTRY has it).
+// The saved session authenticates the PORTAL; the app is entered by replaying the declared
+// Entry-path steps. Define one helper per entry-path server at spec scope and call it at the
+// TOP of every test for that server (each test() gets a fresh page, so re-enter each time).
+//   at top of spec:  test.use({ storageState: STORAGE_STATE_PATH });
+async function enterAppA(page) {
+  await page.goto(PORTAL_URL, { waitUntil: 'domcontentloaded' });   // ENTRY.start resolved to a URL
+  await page.waitForLoadState('networkidle');
+  // ---- replay ENTRY.steps, compiled from the step grammar ----
+  await page.getByRole('button', { name: 'Learning App' }).click();
+  // ---- wait for the handoff to settle on the app ----
+  await page.waitForURL(/app-a\.example\.com/, { timeout: 15000 }); // ENTRY.landing
+  await page.waitForLoadState('networkidle');
+}
+// Expired-session guard for entry-path servers — check the SSO session on the PORTAL origin
+// (that's where the login lives), not the app. Stale → portal bounces off-origin / to login.
+test.beforeAll(async ({ browser }) => {
+  const page = await (await browser.newContext({ storageState: STORAGE_STATE_PATH })).newPage();
+  await page.goto(PORTAL_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await page.waitForURL(u => new URL(u).origin === new URL(PORTAL_URL).origin, { timeout: 8000 }).catch(() => {});
+  const u = new URL(page.url());
+  if (u.origin !== new URL(PORTAL_URL).origin || /login|signin|sign-in|auth|realms\//i.test(u.pathname)) {
+    throw new Error('STORAGE_STATE_EXPIRED');
+  }
+});
+
+// Each criterion for an entry-path server re-enters via the portal, THEN runs its own actions:
+test('criterion on app-a', async ({ page }) => {
+  await enterAppA(page);
+  await expect(page.getByRole('heading', { name: 'My Courses' })).toBeVisible();
 });
 
 // Navigation + element presence — wait for the SPA route to settle.
@@ -265,7 +321,7 @@ If a criterion's assertion still fails intermittently, prefer raising the per-cr
 - 30s per criterion (`test.setTimeout`). In headed mode raise to 60s to absorb the slow-mo delay.
 - 5 min wall-clock total budget; kill the process and mark remaining as `fail (runtime budget exhausted)`. In headed mode raise to 10 min for the same reason.
 - Chromium only. Default headless; `headed=true` switches to a visible browser with `--slow-mo` (default 300ms) so the user can follow each action. Requires a real display — see headed-mode caveats in step 5 of the workflow.
-- Single browser context per spec; share login via `test.beforeAll` (password method) or file-scope `test.use({ storageState })` (storageState method — every test starts authenticated, no login actions at all).
+- Single browser context per spec; share login via `test.beforeAll` (password method) or file-scope `test.use({ storageState })` (storageState method — every test starts authenticated, no login actions at all). For entry-path servers the storageState authenticates the portal, but each `test()` still re-runs the entry-path helper at its top to reach the app (fresh page per test).
 - Skip destructive selectors (`Delete` / `Remove` / `Destroy` / `[data-destructive]`) UNLESS the criterion explicitly tests destruction; then use a throwaway test fixture, never the main test user.
 
 ## Test report skeleton
@@ -280,7 +336,8 @@ Verdict: pass | fail
 ## Runtime prerequisites
 - Playwright: ok | missing (`npm i -D @playwright/test && npx playwright install`)
 - Dev server <name>: ok at <URL> (pre-existing | started-by-tester, killed on exit | unreachable; auto-start log: <path>)
-- Test auth: ok | not configured | storageState: <path> (loaded | missing | expired — refresh cmd)
+- Test auth: ok | not configured | storageState: <path> (loaded | missing | expired — refresh cmd) | shared session across <servers>
+- Entry path <server>: via <start> → <steps> → <landing> (ok | landing not reached) — only for non-deep-linkable apps
 
 ## Test plan
 (drafted before any check; preserved even if execution diverged)
